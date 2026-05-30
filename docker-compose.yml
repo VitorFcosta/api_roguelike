@@ -58,5 +58,22 @@ services:
       RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-60000}
       RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-100}
 
+
+  catalog-service:
+    build:
+      context: ./services/catalog-service
+    container_name: roguelike-catalog-service
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    volumes:
+      - ./services/catalog-service:/app
+      - /app/node_modules    
+    environment:
+      NODE_ENV: development
+      CATALOG_SERVICE_PORT: 3002
+      MONGO_URI: mongodb://mongodb:27017/roguelike 
+
 volumes:
   mongodb-data:
