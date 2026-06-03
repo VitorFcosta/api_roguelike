@@ -8,7 +8,11 @@ const swaggerDocument = {
   servers: [
     {
       url: 'http://localhost:3000/v1',
-      description: 'Ambiente local via Docker Compose'
+      description: 'API - Ambiente local via Docker Compose'
+    },
+    {
+      url: 'http://localhost:3000',
+      description: 'Infra - Health check e métricas (sem prefixo /v1)'
     }
   ],
   components: {
@@ -607,6 +611,48 @@ const swaggerDocument = {
         description: 'Retorna as estatísticas do usuário autenticado.',
         security: [{ bearerAuth: [] }],
         responses: { 200: { description: 'Estatísticas do jogador' } }
+      }
+    },
+    // ─── INFRA ───────────────────────────────────────────────────────────────
+    '/health': {
+      get: {
+        tags: ['Infra'],
+        summary: 'Health check do gateway',
+        description: '⚠️ URL real: `http://localhost:3000/health` (sem prefixo /v1). Verifica se o api-gateway está vivo e respondendo. Rota pública.',
+        responses: {
+          200: {
+            description: 'Serviço saudável',
+            content: {
+              'application/json': {
+                example: {
+                  success: true,
+                  data: {
+                    service: 'api-gateway',
+                    status: 'ok',
+                    timestamp: '2026-06-03T00:00:00.000Z'
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    '/metrics': {
+      get: {
+        tags: ['Infra'],
+        summary: 'Métricas Prometheus',
+        description: '⚠️ URL real: `http://localhost:3000/metrics` (sem prefixo /v1). Expõe métricas no formato Prometheus coletadas automaticamente a cada 15 segundos.',
+        responses: {
+          200: {
+            description: 'Métricas no formato texto Prometheus',
+            content: {
+              'text/plain': {
+                example: 'api_gateway_http_requests_total{method="POST",route="/v1/auth/login",status="200"} 42\napi_gateway_http_request_duration_seconds_bucket{le="0.5"} 40'
+              }
+            }
+          }
+        }
       }
     }
   }
