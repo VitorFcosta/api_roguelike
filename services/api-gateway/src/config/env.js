@@ -30,6 +30,9 @@ function loadConfig() {
   return {
     port: numberFromEnv('GATEWAY_PORT', numberFromEnv('PORT', 3000)),
     authServiceUrl: required('AUTH_SERVICE_URL'),
+    catalogServiceUrl: process.env.CATALOG_SERVICE_URL || 'http://catalog-service:3002',
+    gameServiceUrl: process.env.GAME_SERVICE_URL || 'http://game-service:3003',
+    rankingServiceUrl: process.env.RANKING_SERVICE_URL || 'http://ranking-service:3004',
     jwtSecret: required('JWT_SECRET'),
     jwtIssuer: process.env.JWT_ISSUER || 'roguelike-api',
     jwtAudience: process.env.JWT_AUDIENCE || 'roguelike-client',

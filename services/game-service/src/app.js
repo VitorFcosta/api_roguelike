@@ -12,6 +12,7 @@ const { createBattleRoutes } = require('./routes/battleRoutes');
 const { createRewardRoutes } = require('./routes/rewardRoutes');
 const { errorHandler } = require('./middlewares/errorHandler');
 const { sendSuccess } = require('./utils/responses');
+const { createMetrics } = require('./utils/metrics');
 
 function createApp(options = {}) {
   const hasInjectedDeps =
@@ -36,8 +37,10 @@ function createApp(options = {}) {
     rankingClient
   });
 
+  const { metricsMiddleware, metricsEndpoint } = createMetrics('game_service');
   const app = express();
   app.use(express.json());
+  app.use(metricsMiddleware);
 
   app.get('/health', (_req, res) => {
     return sendSuccess(res, 200, {
@@ -46,6 +49,8 @@ function createApp(options = {}) {
       timestamp: new Date().toISOString()
     });
   });
+
+  app.get('/metrics', metricsEndpoint);
 
   app.use('/runs', createRunRoutes({ gameService }));
   app.use('/battles', createBattleRoutes({ gameService }));

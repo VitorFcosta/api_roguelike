@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
+const swaggerUi = require('swagger-ui-express');
 
 const { loadConfig } = require('./config/env');
 const { AppError } = require('./errors/AppError');
@@ -11,12 +12,8 @@ const { requireRole, requireCatalogPermission } = require('./middlewares/require
 const { forwardHttpRequest } = require('./upstreams/forwardHttpRequest');
 const { buildForwardHeaders } = require('./upstreams/buildForwardHeaders');
 const { sendError, sendSuccess } = require('./utils/responses');
-
-function createUnavailableHandler(code, serviceName) {
-  return (_req, res) => {
-    return sendError(res, 503, code, `${serviceName} ainda não foi implementado.`);
-  };
-}
+const { createMetrics } = require('./utils/metrics');
+const { swaggerDocument } = require('./swagger');
 
 function createForwardHandler({ baseUrl, forwarder }) {
   return async (req, res, next) => {
@@ -46,23 +43,39 @@ function createApp(options = {}) {
   const forwarder = options.forwarder || forwardHttpRequest;
   const app = express();
   const auth = authenticateJwt(config);
-  const forwardToAuth = createForwardHandler({
-    baseUrl: config.authServiceUrl,
-    forwarder
-  });
+
+  const forwardToAuth    = createForwardHandler({ baseUrl: config.authServiceUrl,    forwarder });
+  const forwardToCatalog = createForwardHandler({ baseUrl: config.catalogServiceUrl, forwarder });
+  const forwardToGame    = createForwardHandler({ baseUrl: config.gameServiceUrl,    forwarder });
+  const forwardToRanking = createForwardHandler({ baseUrl: config.rankingServiceUrl, forwarder });
+
+  const { metricsMiddleware, metricsEndpoint } = createMetrics('api_gateway');
 
   app.use(requestId);
   app.use(cors({ origin: config.corsOrigin }));
   app.use(express.json());
+  app.use(metricsMiddleware);
 
   if (config.rateLimitEnabled !== false) {
     app.use(rateLimit({
       windowMs: config.rateLimitWindowMs,
       limit: config.rateLimitMax,
       standardHeaders: true,
-      legacyHeaders: false
+      legacyHeaders: false,
+      handler: (_req, res) => sendError(res, 429, 'RATE_LIMIT_EXCEEDED', 'Muitas requisições. Tente novamente mais tarde.')
     }));
   }
+
+  // ─── SWAGGER ───────────────────────────────────────────────────────────────
+  app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument, {
+    customSiteTitle: 'API Roguelike de Cartas',
+    swaggerOptions: {
+      persistAuthorization: true
+    }
+  }));
+
+  // ─── INFRA ─────────────────────────────────────────────────────────────────
+  app.get('/metrics', metricsEndpoint);
 
   app.get('/health', (_req, res) => {
     return sendSuccess(res, 200, {
@@ -72,30 +85,30 @@ function createApp(options = {}) {
     });
   });
 
+  // ─── AUTH ──────────────────────────────────────────────────────────────────
   app.post('/v1/auth/register', forwardToAuth);
   app.post('/v1/auth/login', forwardToAuth);
   app.get('/v1/users/me', auth, forwardToAuth);
   app.get('/v1/users', auth, requireRole('admin'), forwardToAuth);
 
-  app.use(
-    ['/v1/cards', '/v1/enemies', '/v1/bosses'],
-    auth,
-    requireCatalogPermission,
-    createUnavailableHandler('CATALOG_SERVICE_UNAVAILABLE', 'catalog-service')
-  );
+  // ─── CATALOG ───────────────────────────────────────────────────────────────
+  app.get('/v1/cards/starter', forwardToCatalog);
+  app.get('/v1/enemies/random', forwardToCatalog);
+  app.get('/v1/bosses/random', forwardToCatalog);
 
-  app.use(
-    ['/v1/runs', '/v1/battles', '/v1/rewards'],
-    auth,
-    createUnavailableHandler('GAME_SERVICE_UNAVAILABLE', 'game-service')
-  );
+  app.use('/v1/cards',   auth, requireCatalogPermission, forwardToCatalog);
+  app.use('/v1/enemies', auth, requireCatalogPermission, forwardToCatalog);
+  app.use('/v1/bosses',  auth, requireCatalogPermission, forwardToCatalog);
 
-  app.use(
-    '/v1/ranking',
-    auth,
-    createUnavailableHandler('RANKING_SERVICE_UNAVAILABLE', 'ranking-service')
-  );
+  // ─── GAME ──────────────────────────────────────────────────────────────────
+  app.use('/v1/runs',    auth, forwardToGame);
+  app.use('/v1/battles', auth, forwardToGame);
+  app.use('/v1/rewards', auth, forwardToGame);
 
+  // ─── RANKING ───────────────────────────────────────────────────────────────
+  app.use('/v1/ranking', auth, forwardToRanking);
+
+  // ─── 404 ───────────────────────────────────────────────────────────────────
   app.use((_req, _res, next) => {
     next(new AppError(404, 'NOT_FOUND', 'Rota não encontrada.'));
   });
