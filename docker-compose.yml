@@ -1,4 +1,6 @@
 services:
+
+  # ─── BANCO DE DADOS ────────────────────────────────────────────────────────
   mongodb:
     image: mongo:7
     container_name: roguelike-mongodb
@@ -11,6 +13,7 @@ services:
       timeout: 5s
       retries: 5
 
+  # ─── SERVIÇOS ──────────────────────────────────────────────────────────────
   auth-service:
     build:
       context: ./services/auth-service
@@ -32,7 +35,67 @@ services:
       ADMIN_SEED_EMAIL: ${ADMIN_SEED_EMAIL:-admin@email.com}
       ADMIN_SEED_PASSWORD: ${ADMIN_SEED_PASSWORD:-admin123456}
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/health').then((response)=>process.exit(response.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  catalog-service:
+    build:
+      context: ./services/catalog-service
+    container_name: roguelike-catalog-service
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      CATALOG_SERVICE_PORT: 3002
+      MONGO_URI: mongodb://mongodb:27017/roguelike
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3002/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  game-service:
+    build:
+      context: ./services/game-service
+    container_name: roguelike-game-service
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      catalog-service:
+        condition: service_healthy
+      ranking-service:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      GAME_SERVICE_PORT: 3003
+      MONGO_URI: mongodb://mongodb:27017/roguelike
+      CATALOG_SERVICE_URL: http://catalog-service:3002
+      RANKING_SERVICE_URL: http://ranking-service:3004
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3003/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ranking-service:
+    build:
+      context: ./services/ranking-service
+    container_name: roguelike-ranking-service
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      RANKING_SERVICE_PORT: 3004
+      MONGO_URI: mongodb://mongodb:27017/roguelike
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3004/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -45,12 +108,21 @@ services:
     depends_on:
       auth-service:
         condition: service_healthy
+      catalog-service:
+        condition: service_healthy
+      game-service:
+        condition: service_healthy
+      ranking-service:
+        condition: service_healthy
     ports:
       - "3000:3000"
     environment:
       NODE_ENV: development
       GATEWAY_PORT: 3000
       AUTH_SERVICE_URL: http://auth-service:3001
+      CATALOG_SERVICE_URL: http://catalog-service:3002
+      GAME_SERVICE_URL: http://game-service:3003
+      RANKING_SERVICE_URL: http://ranking-service:3004
       JWT_SECRET: ${JWT_SECRET:-trocar_em_ambiente_real}
       JWT_ISSUER: ${JWT_ISSUER:-roguelike-api}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-roguelike-client}
@@ -58,22 +130,37 @@ services:
       RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-60000}
       RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-100}
 
-
-  catalog-service:
-    build:
-      context: ./services/catalog-service
-    container_name: roguelike-catalog-service
+  # ─── OBSERVABILIDADE ───────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    container_name: roguelike-prometheus
     restart: unless-stopped
-    depends_on:
-      mongodb:
-        condition: service_healthy
+    ports:
+      - "9090:9090"
     volumes:
-      - ./services/catalog-service:/app
-      - /app/node_modules    
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: roguelike-grafana
+    restart: unless-stopped
+    ports:
+      - "3005:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
     environment:
-      NODE_ENV: development
-      CATALOG_SERVICE_PORT: 3002
-      MONGO_URI: mongodb://mongodb:27017/roguelike 
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    depends_on:
+      - prometheus
 
 volumes:
   mongodb-data:
+  prometheus-data:
+  grafana-data:

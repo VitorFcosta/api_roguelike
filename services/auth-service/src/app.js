@@ -7,14 +7,17 @@ const { createAuthRoutes } = require('./routes/authRoutes');
 const { createUserRoutes } = require('./routes/userRoutes');
 const { errorHandler } = require('./middlewares/errorHandler');
 const { sendSuccess } = require('./utils/responses');
+const { createMetrics } = require('./utils/metrics');
 
 function createApp(options = {}) {
   const config = options.config || loadConfig();
   const userRepository = options.userRepository || createUserRepository();
   const authService = createAuthService({ userRepository, config });
+  const { metricsMiddleware, metricsEndpoint } = createMetrics('auth_service');
   const app = express();
 
   app.use(express.json());
+  app.use(metricsMiddleware);
 
   app.get('/health', (_req, res) => {
     return sendSuccess(res, 200, {
@@ -23,6 +26,8 @@ function createApp(options = {}) {
       timestamp: new Date().toISOString()
     });
   });
+
+  app.get('/metrics', metricsEndpoint);
 
   app.use('/auth', createAuthRoutes({ authService }));
   app.use('/users', createUserRoutes({ userRepository }));

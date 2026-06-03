@@ -12,6 +12,7 @@ const { createEnemyRoutes } = require('./routes/enemyRoutes');
 const { createBossRoutes } = require('./routes/bossRoutes');
 const { errorHandler } = require('./middlewares/errorHandler');
 const { sendSuccess } = require('./utils/responses');
+const { createMetrics } = require('./utils/metrics');
 
 function createApp(options = {}) {
   const hasInjectedRepositories =
@@ -27,9 +28,11 @@ function createApp(options = {}) {
   const enemyService = createEnemyService({ enemyRepository });
   const bossService = createBossService({ bossRepository });
 
+  const { metricsMiddleware, metricsEndpoint } = createMetrics('catalog_service');
   const app = express();
 
   app.use(express.json());
+  app.use(metricsMiddleware);
 
   app.get('/health', (_req, res) => {
     return sendSuccess(res, 200, {
@@ -38,6 +41,8 @@ function createApp(options = {}) {
       timestamp: new Date().toISOString()
     });
   });
+
+  app.get('/metrics', metricsEndpoint);
 
   app.use('/cards', createCardRoutes({ cardService }));
   app.use('/enemies', createEnemyRoutes({ enemyService }));

@@ -1,9 +1,0 @@
-node_modules/
-coverage/
-.DS_Store
-.env
-.env.*
-!.env.example
-npm-debug.log*
-Dockerfile.local
-AGENTS.md
