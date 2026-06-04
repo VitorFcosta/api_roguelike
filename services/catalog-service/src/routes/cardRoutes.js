@@ -20,8 +20,8 @@ function createCardRoutes({ cardService }) {
 
   router.get(
     '/',
-    asyncHandler(async (_req, res) => {
-      const cards = await cardService.listActive();
+    asyncHandler(async (req, res) => {
+      const cards = await cardService.listActive(req.query);
       return sendSuccess(res, 200, cards);
     })
   );

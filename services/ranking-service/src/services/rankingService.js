@@ -2,13 +2,21 @@ const { AppError } = require('../errors/AppError');
 
 function createRankingService({ rankingRepository }) {
 
-  async function registerRunResult({ userId, runId, userName, status, floor }) {
-    if (!userId || !status) {
+  async function registerRunResult({ userId, runId, userName, status, result, floor, score }) {
+    const finalStatus = status || result;
+
+    if (!userId || !finalStatus) {
       throw new AppError(400, 'INVALID_PAYLOAD', 'userId e status são obrigatórios.');
     }
 
-    const isVictory = status === 'victory';
-    const score = isVictory ? (floor || 1) * 100 : (floor || 1) * 10;
+    if (!['victory', 'defeat', 'abandoned'].includes(finalStatus)) {
+      throw new AppError(400, 'INVALID_STATUS', 'Status de run inválido.');
+    }
+
+    const isVictory = finalStatus === 'victory';
+    const calculatedScore = Number.isFinite(score)
+      ? score
+      : (isVictory ? (floor || 1) * 100 : (floor || 1) * 10);
 
     // userName é opcional, usa fallback se não vier
     const name = userName || `Jogador-${userId.toString().slice(-6)}`;
@@ -17,12 +25,13 @@ function createRankingService({ rankingRepository }) {
       userId: userId.toString(),
       userName: name,
       isVictory,
-      score
+      score: calculatedScore,
+      runId
     });
   }
 
-  async function getGlobalRanking() {
-    return rankingRepository.findAll();
+  async function getGlobalRanking(options = {}) {
+    return rankingRepository.findAll(options);
   }
 
   async function getUserStats(userId) {

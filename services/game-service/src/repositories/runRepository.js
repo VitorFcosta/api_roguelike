@@ -1,5 +1,11 @@
 const { Run } = require('../models/Run');
 
+function parsePagination({ limit = 50, page = 1 } = {}) {
+  const parsedLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+  const parsedPage = Math.max(Number(page) || 1, 1);
+  return { limit: parsedLimit, skip: (parsedPage - 1) * parsedLimit };
+}
+
 function createRunRepository() {
   return {
     async create(data) {
@@ -10,8 +16,16 @@ function createRunRepository() {
       return Run.findById(id);
     },
 
-    async findByUserId(userId) {
-      return Run.find({ userId }).sort({ createdAt: -1 });
+    async findByUserId(userId, options = {}) {
+      const { limit, skip } = parsePagination(options);
+      const query = { userId };
+
+      if (options.status) query.status = options.status;
+
+      return Run.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit);
     },
 
     async findActiveByUserId(userId) {

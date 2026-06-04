@@ -124,7 +124,7 @@ function playRun(token, playerName) {
       sleep(0.5);
     }
 
-    if (battleStatus === 'lost' || battleStatus === 'defeat') {
+    if (battleStatus === 'defeat') {
       runStatus = 'defeat';
       break;
     }

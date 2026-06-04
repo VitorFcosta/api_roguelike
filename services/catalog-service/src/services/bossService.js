@@ -1,8 +1,8 @@
 const { AppError } = require('../errors/AppError');
 
 function createBossService({ bossRepository }) {
-  async function listActive() {
-    return bossRepository.listActive();
+  async function listActive(options = {}) {
+    return bossRepository.listActive(options);
   }
 
   async function findById(id) {

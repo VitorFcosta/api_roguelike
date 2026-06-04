@@ -1,8 +1,8 @@
 const { AppError } = require('../errors/AppError');
 
 function createEnemyService({ enemyRepository }) {
-  async function listActive() {
-    return enemyRepository.listActive();
+  async function listActive(options = {}) {
+    return enemyRepository.listActive(options);
   }
 
   async function findById(id) {

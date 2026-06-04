@@ -7,6 +7,9 @@ function createTestConfig() {
   return {
     port: 3000,
     authServiceUrl: 'http://auth-service:3001',
+    catalogServiceUrl: 'http://catalog-service:3002',
+    gameServiceUrl: 'http://game-service:3003',
+    rankingServiceUrl: 'http://ranking-service:3004',
     jwtSecret: 'test_secret_for_gateway',
     jwtIssuer: 'roguelike-api',
     jwtAudience: 'roguelike-client',
@@ -120,5 +123,23 @@ describe('api-gateway', () => {
 
     expect(response.status).toBe(503);
     expect(response.body.error.code).toBe('CATALOG_SERVICE_UNAVAILABLE');
+  });
+
+  test('ranking event route is not exposed through the public gateway', async () => {
+    const config = createTestConfig();
+    const forwarder = jest.fn(async () => ({
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: { success: true, data: {} }
+    }));
+    const app = createApp({ config, forwarder });
+
+    const response = await request(app)
+      .post('/v1/ranking/events/run-finished')
+      .set('Authorization', `Bearer ${signToken(config, 'user', 'user-1')}`)
+      .send({ userId: 'user-1', status: 'victory', floor: 6 });
+
+    expect(response.status).toBe(404);
+    expect(forwarder).not.toHaveBeenCalled();
   });
 });

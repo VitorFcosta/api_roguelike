@@ -22,7 +22,7 @@ function createRunRoutes({ gameService }) {
     '/',
     requireGatewayAuth,
     asyncHandler(async (req, res) => {
-      const runs = await gameService.listRuns(req.user.id);
+      const runs = await gameService.listRuns(req.user.id, req.query);
       return sendSuccess(res, 200, runs);
     })
   );

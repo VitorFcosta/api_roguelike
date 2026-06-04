@@ -1,5 +1,13 @@
 const { AppError } = require('../errors/AppError');
 
+function getServiceName(baseUrl) {
+  try {
+    return new URL(baseUrl).hostname || 'upstream-service';
+  } catch {
+    return 'upstream-service';
+  }
+}
+
 async function forwardHttpRequest({ baseUrl, path, method, headers, body }) {
   const url = new URL(path, baseUrl);
   const options = {
@@ -20,7 +28,9 @@ async function forwardHttpRequest({ baseUrl, path, method, headers, body }) {
   try {
     response = await fetch(url, options);
   } catch (_error) {
-    throw new AppError(503, 'AUTH_SERVICE_UNAVAILABLE', 'auth-service indisponível.');
+    const serviceName = getServiceName(baseUrl);
+    const code = `${serviceName.replace(/-/g, '_').toUpperCase()}_UNAVAILABLE`;
+    throw new AppError(503, code, `${serviceName} indisponível.`);
   }
 
   const contentType = response.headers.get('content-type') || '';

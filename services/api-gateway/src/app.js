@@ -106,7 +106,8 @@ function createApp(options = {}) {
   app.use('/v1/rewards', auth, forwardToGame);
 
   // ─── RANKING ───────────────────────────────────────────────────────────────
-  app.use('/v1/ranking', auth, forwardToRanking);
+  app.get('/v1/ranking', auth, forwardToRanking);
+  app.get('/v1/ranking/me', auth, forwardToRanking);
 
   // ─── 404 ───────────────────────────────────────────────────────────────────
   app.use((_req, _res, next) => {

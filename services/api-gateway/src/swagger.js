@@ -111,21 +111,36 @@ const swaggerDocument = {
         properties: {
           _id: { type: 'string', example: '664000000000000000000200' },
           runId: { type: 'string', example: '664000000000000000000100' },
-          status: { type: 'string', enum: ['active', 'won', 'lost'], example: 'active' },
+          status: { type: 'string', enum: ['active', 'victory', 'defeat'], example: 'active' },
           type: { type: 'string', enum: ['common', 'boss'], example: 'common' },
           turn: { type: 'number', example: 2 },
-          playerHp: { type: 'number', example: 72 },
+          playerCurrentHp: { type: 'number', example: 72 },
           playerBlock: { type: 'number', example: 0 },
-          enemy: {
-            type: 'object',
-            properties: {
-              name: { type: 'string', example: 'Goblin' },
-              currentHp: { type: 'number', example: 18 },
-              maxHp: { type: 'number', example: 30 },
-              attack: { type: 'number', example: 6 }
-            }
+          enemyName: { type: 'string', example: 'Goblin' },
+          enemyCurrentHp: { type: 'number', example: 18 },
+          enemyMaxHp: { type: 'number', example: 30 },
+          enemyAttack: { type: 'number', example: 6 },
+          log: {
+            type: 'array',
+            items: { type: 'string' },
+            example: ['Batalha contra Goblin iniciada.', 'Jogador usou Golpe e causou 6 de dano.']
+          }
+        }
+      },
+      Reward: {
+        type: 'object',
+        properties: {
+          _id: { type: 'string', example: '664000000000000000000300' },
+          runId: { type: 'string', example: '664000000000000000000100' },
+          battleId: { type: 'string', example: '664000000000000000000200' },
+          status: { type: 'string', enum: ['pending', 'chosen'], example: 'pending' },
+          options: {
+            type: 'array',
+            minItems: 3,
+            maxItems: 3,
+            items: { '$ref': '#/components/schemas/Card' }
           },
-          log: { type: 'array', items: { type: 'string' } }
+          chosenCardId: { type: 'string', nullable: true, example: null }
         }
       },
       Ranking: {
@@ -241,8 +256,17 @@ const swaggerDocument = {
       get: {
         tags: ['Cards'],
         summary: 'Listar cartas',
-        description: 'Retorna todas as cartas ativas. Requer JWT.',
+        description: 'Retorna cartas ativas com filtros simples, paginação e ordenação. Requer JWT.',
         security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'name', in: 'query', schema: { type: 'string' }, description: 'Busca parcial por nome' },
+          { name: 'type', in: 'query', schema: { type: 'string', enum: ['attack', 'block', 'heal'] } },
+          { name: 'rarity', in: 'query', schema: { type: 'string', enum: ['basic', 'common', 'rare'] } },
+          { name: 'isStarter', in: 'query', schema: { type: 'boolean' } },
+          { name: 'page', in: 'query', schema: { type: 'integer', default: 1, minimum: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', default: 50, minimum: 1, maximum: 100 } },
+          { name: 'sort', in: 'query', schema: { type: 'string', example: 'name' }, description: 'Campos aceitos: createdAt, name, type, rarity, cost, value. Use -name para ordem decrescente.' }
+        ],
         responses: {
           200: { description: 'Lista de cartas' },
           401: { description: 'Token ausente ou inválido' }
@@ -329,7 +353,15 @@ const swaggerDocument = {
       get: {
         tags: ['Enemies'],
         summary: 'Listar inimigos',
+        description: 'Retorna inimigos ativos com filtros simples, paginação e ordenação.',
         security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'name', in: 'query', schema: { type: 'string' }, description: 'Busca parcial por nome' },
+          { name: 'difficulty', in: 'query', schema: { type: 'integer', minimum: 1 } },
+          { name: 'page', in: 'query', schema: { type: 'integer', default: 1, minimum: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', default: 50, minimum: 1, maximum: 100 } },
+          { name: 'sort', in: 'query', schema: { type: 'string', example: 'difficulty' }, description: 'Campos aceitos: createdAt, name, difficulty, maxHp, attack. Use -difficulty para ordem decrescente.' }
+        ],
         responses: { 200: { description: 'Lista de inimigos ativos' } }
       },
       post: {
@@ -393,7 +425,15 @@ const swaggerDocument = {
       get: {
         tags: ['Bosses'],
         summary: 'Listar bosses',
+        description: 'Retorna bosses ativos com filtros simples, paginação e ordenação.',
         security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'name', in: 'query', schema: { type: 'string' }, description: 'Busca parcial por nome' },
+          { name: 'difficulty', in: 'query', schema: { type: 'integer', minimum: 1 } },
+          { name: 'page', in: 'query', schema: { type: 'integer', default: 1, minimum: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', default: 50, minimum: 1, maximum: 100 } },
+          { name: 'sort', in: 'query', schema: { type: 'string', example: 'difficulty' }, description: 'Campos aceitos: createdAt, name, difficulty, maxHp, attack. Use -difficulty para ordem decrescente.' }
+        ],
         responses: { 200: { description: 'Lista de bosses ativos' } }
       },
       post: {
@@ -465,8 +505,13 @@ const swaggerDocument = {
       get: {
         tags: ['Runs'],
         summary: 'Histórico de runs',
-        description: 'Lista todas as runs do usuário autenticado.',
+        description: 'Lista runs do usuário autenticado com filtro por status e paginação.',
         security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'status', in: 'query', schema: { type: 'string', enum: ['active', 'victory', 'defeat', 'abandoned'] } },
+          { name: 'page', in: 'query', schema: { type: 'integer', default: 1, minimum: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', default: 50, minimum: 1, maximum: 100 } }
+        ],
         responses: { 200: { description: 'Lista de runs' } }
       }
     },
@@ -487,7 +532,7 @@ const swaggerDocument = {
       post: {
         tags: ['Runs'],
         summary: 'Criar próxima batalha',
-        description: 'Inicia a próxima batalha da run. O sistema escolhe automaticamente o inimigo.',
+        description: 'Inicia a próxima batalha da run. O sistema cria 5 batalhas comuns e depois 1 boss.',
         security: [{ bearerAuth: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
         responses: {
@@ -533,6 +578,7 @@ const swaggerDocument = {
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
         responses: {
           200: { description: 'Estado da batalha' },
+          403: { description: 'Batalha pertence a outro usuário' },
           404: { description: 'Batalha não encontrada' }
         }
       }
@@ -599,8 +645,13 @@ const swaggerDocument = {
       get: {
         tags: ['Ranking'],
         summary: 'Ranking geral',
-        description: 'Retorna os 50 melhores jogadores ordenados por melhor pontuação.',
+        description: 'Retorna o ranking geral. Por padrão ordena por bestScore desc.',
         security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'sort', in: 'query', schema: { type: 'string', enum: ['bestScore', 'victories', 'totalRuns', 'lastRunAt'], default: 'bestScore' } },
+          { name: 'page', in: 'query', schema: { type: 'integer', default: 1, minimum: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', default: 50, minimum: 1, maximum: 100 } }
+        ],
         responses: { 200: { description: 'Lista do ranking' } }
       }
     },

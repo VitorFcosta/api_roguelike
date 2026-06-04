@@ -69,22 +69,35 @@ docker compose exec catalog-service npm run seed:catalog
 
 Acesse o Swagger em **http://localhost:3000/docs** para visualizar e testar todos os endpoints.
 
+> Observação: o projeto usa `/docs`; a rota `/api-docs` não é utilizada.
+
 Para testar rotas protegidas no Swagger:
 1. Execute `POST /auth/login` com as credenciais do admin
 2. Copie o token retornado
 3. Clique em **Authorize** no topo direito
 4. Cole o token e confirme
 
+Documentos locais:
+
+| Documento | Conteúdo |
+|-----------|----------|
+| `docs/requirements.md` | Requisitos e regras de negócio |
+| `docs/sdd.md` | Desenho técnico dos serviços |
+| `docs/mongodb-modeling.md` | Modelos MongoDB |
+| `docs/api-endpoints.md` | Rotas públicas e internas |
+| `docs/architecture.md` | Mapa da arquitetura |
+
 ---
 
 ## Testes de carga com k6
 
-O projeto possui cinco scripts k6 na pasta `tests/load/k6/`:
+O projeto possui seis scripts k6 na pasta `tests/load/k6/`:
 
 | Script | Descrição |
 |--------|-----------|
 | `main.js` | Teste de carga geral com múltiplos usuários simultâneos |
 | `ranking.js` | Fluxo completo: login, run, batalhas, boss e ranking |
+| `stress.js` | Teste de stress para observar rate limit, latência e erros sob carga maior |
 | `populate.js` | Cadastra 8 jogadores e faz runs para popular o ranking |
 | `debug.js` | Debug simples de login com 1 usuário |
 | `debug2.js` | Debug de login com 5 usuários simultâneos |
@@ -100,6 +113,14 @@ k6 run tests/load/k6/main.js
 ```bash
 k6 run tests/load/k6/ranking.js
 ```
+
+### Teste de stress
+
+```bash
+k6 run tests/load/k6/stress.js
+```
+
+Esse teste aumenta a carga gradualmente e conta respostas `429 RATE_LIMIT_EXCEEDED` como comportamento esperado de stress. O objetivo é descobrir quando o limite original do gateway começa a atuar.
 
 ### Popular ranking com múltiplos jogadores
 
@@ -126,7 +147,7 @@ rate(api_gateway_http_requests_total[1m])
 
 Acesse http://localhost:3005 com usuário `admin` e senha `admin`.
 
-O datasource do Prometheus já vem configurado automaticamente. Para criar um dashboard, vá em **Dashboards → New → New Dashboard** e use as queries do Prometheus.
+O datasource do Prometheus e o dashboard **Roguelike API Overview** já vêm configurados automaticamente.
 
 ---
 
@@ -153,6 +174,9 @@ curl http://localhost:3000/metrics
 ## Comandos úteis
 
 ```bash
+# Rodar testes automatizados
+npm test
+
 # Ver status dos containers
 docker compose ps
 
@@ -188,9 +212,10 @@ docker compose down -v
 │   └── ranking-service/    Ranking e estatísticas
 ├── monitoring/
 │   ├── prometheus/         Configuração de coleta de métricas
-│   └── grafana/            Datasources provisionados automaticamente
+│   └── grafana/            Datasource e dashboard provisionados automaticamente
 ├── tests/
 │   └── load/k6/            Scripts de teste de carga
+├── docs/                   Documentação técnica local
 ├── docker-compose.yml
 ├── .env.example
 └── README.md
@@ -222,3 +247,5 @@ docker compose down -v
 5. `POST /v1/battles/:id/actions/play-card` — Usar carta
 6. `POST /v1/rewards/:id/choose` — Escolher recompensa
 7. `GET /v1/ranking` — Consultar ranking
+
+Uma run usa os status `active`, `victory`, `defeat` e `abandoned`. O fluxo completo tem 5 batalhas comuns antes do boss.

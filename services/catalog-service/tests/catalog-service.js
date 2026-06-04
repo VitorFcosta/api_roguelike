@@ -16,8 +16,26 @@ function createMemoryCardRepository() {
 
   return {
     cards,
-    async listActive() {
-      return cards.filter((c) => c.isActive);
+    async listActive(options = {}) {
+      let result = cards.filter((c) => c.isActive);
+      if (options.name) {
+        result = result.filter((c) => c.name.toLowerCase().includes(options.name.toLowerCase()));
+      }
+      if (options.type) {
+        result = result.filter((c) => c.type === options.type);
+      }
+      if (options.rarity) {
+        result = result.filter((c) => c.rarity === options.rarity);
+      }
+      if (options.isStarter !== undefined) {
+        result = result.filter((c) => String(c.isStarter) === String(options.isStarter));
+      }
+      if (options.sort === 'name') {
+        result = [...result].sort((a, b) => a.name.localeCompare(b.name));
+      }
+      const limit = Number(options.limit) || result.length;
+      const page = Number(options.page) || 1;
+      return result.slice((page - 1) * limit, page * limit);
     },
     async findById(id) {
       return cards.find((c) => c._id === id && c.isActive) || null;
@@ -58,8 +76,17 @@ function createMemoryEnemyRepository() {
 
   return {
     enemies,
-    async listActive() {
-      return enemies.filter((e) => e.isActive);
+    async listActive(options = {}) {
+      let result = enemies.filter((e) => e.isActive);
+      if (options.name) {
+        result = result.filter((e) => e.name.toLowerCase().includes(options.name.toLowerCase()));
+      }
+      if (options.difficulty) {
+        result = result.filter((e) => String(e.difficulty) === String(options.difficulty));
+      }
+      const limit = Number(options.limit) || result.length;
+      const page = Number(options.page) || 1;
+      return result.slice((page - 1) * limit, page * limit);
     },
     async findById(id) {
       return enemies.find((e) => e._id === id && e.isActive) || null;
@@ -102,8 +129,17 @@ function createMemoryBossRepository() {
 
   return {
     bosses,
-    async listActive() {
-      return bosses.filter((b) => b.isActive);
+    async listActive(options = {}) {
+      let result = bosses.filter((b) => b.isActive);
+      if (options.name) {
+        result = result.filter((b) => b.name.toLowerCase().includes(options.name.toLowerCase()));
+      }
+      if (options.difficulty) {
+        result = result.filter((b) => String(b.difficulty) === String(options.difficulty));
+      }
+      const limit = Number(options.limit) || result.length;
+      const page = Number(options.page) || 1;
+      return result.slice((page - 1) * limit, page * limit);
     },
     async findById(id) {
       return bosses.find((b) => b._id === id && b.isActive) || null;
@@ -272,6 +308,55 @@ describe('catalog-service', () => {
     expect(response.body.data[0].name).toBe('Carta B');
   });
 
+  test('GET /cards aplica filtros e paginação simples', async () => {
+    await request(app)
+      .post('/cards')
+      .set(ADMIN_HEADERS)
+      .send({ ...validCard, name: 'Ataque Raro', rarity: 'rare' });
+    await request(app)
+      .post('/cards')
+      .set(ADMIN_HEADERS)
+      .send({ ...validCard, name: 'Defesa Comum', type: 'block', rarity: 'common' });
+    await request(app)
+      .post('/cards')
+      .set(ADMIN_HEADERS)
+      .send({ ...validCard, name: 'Ataque Comum', rarity: 'common' });
+
+    const response = await request(app)
+      .get('/cards?type=attack&rarity=common&limit=1&page=1&sort=name');
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toHaveLength(1);
+    expect(response.body.data[0].name).toBe('Ataque Comum');
+  });
+
+  test('PUT /cards/:id atualiza carta como admin', async () => {
+    const created = await request(app)
+      .post('/cards')
+      .set(ADMIN_HEADERS)
+      .send(validCard);
+
+    const id = created.body.data._id;
+
+    const response = await request(app)
+      .put(`/cards/${id}`)
+      .set(ADMIN_HEADERS)
+      .send({
+        name: 'Golpe Aprimorado',
+        value: 9,
+        rarity: 'common'
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toMatchObject({
+      _id: id,
+      name: 'Golpe Aprimorado',
+      value: 9,
+      rarity: 'common',
+      isActive: true
+    });
+  });
+
   test('DELETE /cards/:id executa soft delete e retorna isActive=false', async () => {
     const created = await request(app)
       .post('/cards')
@@ -402,6 +487,70 @@ describe('catalog-service', () => {
     expect(response.body.data[0].name).toBe('Troll');
   });
 
+  test('GET /enemies aplica filtros simples', async () => {
+    await request(app).post('/enemies').set(ADMIN_HEADERS).send(validEnemy);
+    await request(app)
+      .post('/enemies')
+      .set(ADMIN_HEADERS)
+      .send({ ...validEnemy, name: 'Troll', difficulty: 4 });
+
+    const response = await request(app).get('/enemies?difficulty=4&limit=1');
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toHaveLength(1);
+    expect(response.body.data[0].name).toBe('Troll');
+  });
+
+  test('PUT /enemies/:id atualiza inimigo como admin', async () => {
+    const created = await request(app)
+      .post('/enemies')
+      .set(ADMIN_HEADERS)
+      .send(validEnemy);
+
+    const id = created.body.data._id;
+
+    const response = await request(app)
+      .put(`/enemies/${id}`)
+      .set(ADMIN_HEADERS)
+      .send({
+        name: 'Goblin Veterano',
+        maxHp: 25,
+        attack: 7,
+        difficulty: 3
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toMatchObject({
+      _id: id,
+      name: 'Goblin Veterano',
+      maxHp: 25,
+      attack: 7,
+      difficulty: 3,
+      isActive: true
+    });
+  });
+
+  test('DELETE /enemies/:id executa soft delete e remove da listagem ativa', async () => {
+    const created = await request(app)
+      .post('/enemies')
+      .set(ADMIN_HEADERS)
+      .send(validEnemy);
+
+    const id = created.body.data._id;
+
+    const deleteResponse = await request(app)
+      .delete(`/enemies/${id}`)
+      .set(ADMIN_HEADERS);
+
+    expect(deleteResponse.status).toBe(200);
+    expect(deleteResponse.body.data.isActive).toBe(false);
+    expect(deleteResponse.body.data.deletedAt).not.toBeNull();
+
+    const listResponse = await request(app).get('/enemies');
+    expect(listResponse.status).toBe(200);
+    expect(listResponse.body.data).toHaveLength(0);
+  });
+
   // ----------------------------------------------------------
   // Bosses
   // ----------------------------------------------------------
@@ -442,6 +591,72 @@ describe('catalog-service', () => {
     expect(response.body.data.name).toBe('Guardião das Trevas');
   });
 
+  test('GET /bosses aplica filtros simples', async () => {
+    await request(app).post('/bosses').set(ADMIN_HEADERS).send(validBoss);
+    await request(app)
+      .post('/bosses')
+      .set(ADMIN_HEADERS)
+      .send({ ...validBoss, name: 'Leshen', difficulty: 5 });
+
+    const response = await request(app).get('/bosses?name=lesh&limit=1');
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toHaveLength(1);
+    expect(response.body.data[0].name).toBe('Leshen');
+  });
+
+  test('PUT /bosses/:id atualiza boss como admin', async () => {
+    const created = await request(app)
+      .post('/bosses')
+      .set(ADMIN_HEADERS)
+      .send(validBoss);
+
+    const id = created.body.data._id;
+
+    const response = await request(app)
+      .put(`/bosses/${id}`)
+      .set(ADMIN_HEADERS)
+      .send({
+        name: 'Guardião Ancestral',
+        maxHp: 180,
+        attack: 25,
+        specialAttack: 45,
+        difficulty: 12
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toMatchObject({
+      _id: id,
+      name: 'Guardião Ancestral',
+      maxHp: 180,
+      attack: 25,
+      specialAttack: 45,
+      difficulty: 12,
+      isActive: true
+    });
+  });
+
+  test('DELETE /bosses/:id executa soft delete e remove da listagem ativa', async () => {
+    const created = await request(app)
+      .post('/bosses')
+      .set(ADMIN_HEADERS)
+      .send(validBoss);
+
+    const id = created.body.data._id;
+
+    const deleteResponse = await request(app)
+      .delete(`/bosses/${id}`)
+      .set(ADMIN_HEADERS);
+
+    expect(deleteResponse.status).toBe(200);
+    expect(deleteResponse.body.data.isActive).toBe(false);
+    expect(deleteResponse.body.data.deletedAt).not.toBeNull();
+
+    const listResponse = await request(app).get('/bosses');
+    expect(listResponse.status).toBe(200);
+    expect(listResponse.body.data).toHaveLength(0);
+  });
+
   test('GET /bosses/random retorna 404 quando não há bosses ativos', async () => {
     const response = await request(app).get('/bosses/random');
 
@@ -465,6 +680,26 @@ describe('catalog-service', () => {
       .post('/cards')
       .set({ 'X-User-Id': 'user-1', 'X-User-Role': 'user' })
       .send(validCard);
+
+    expect(response.status).toBe(403);
+    expect(response.body.error.code).toBe('FORBIDDEN');
+  });
+
+  test('POST /enemies com usuário comum retorna 403', async () => {
+    const response = await request(app)
+      .post('/enemies')
+      .set({ 'X-User-Id': 'user-1', 'X-User-Role': 'user' })
+      .send(validEnemy);
+
+    expect(response.status).toBe(403);
+    expect(response.body.error.code).toBe('FORBIDDEN');
+  });
+
+  test('POST /bosses com usuário comum retorna 403', async () => {
+    const response = await request(app)
+      .post('/bosses')
+      .set({ 'X-User-Id': 'user-1', 'X-User-Role': 'user' })
+      .send(validBoss);
 
     expect(response.status).toBe(403);
     expect(response.body.error.code).toBe('FORBIDDEN');

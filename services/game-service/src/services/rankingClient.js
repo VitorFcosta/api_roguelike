@@ -1,7 +1,7 @@
 function createRankingClient(baseUrl) {
   async function registerRunResult({ userId, runId, status, floor }) {
     try {
-      await fetch(`${baseUrl}/rankings`, {
+      await fetch(`${baseUrl}/ranking/events/run-finished`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId, runId, status, floor })

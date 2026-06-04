@@ -5,8 +5,18 @@ function createRankingRepository() {
     return Ranking.findOne({ userId }).lean();
   }
 
-  async function findAll() {
-    return Ranking.find().sort({ bestScore: -1 }).limit(50).lean();
+  async function findAll({ limit = 50, page = 1, sort = 'bestScore' } = {}) {
+    const parsedLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+    const parsedPage = Math.max(Number(page) || 1, 1);
+    const sortField = ['bestScore', 'victories', 'totalRuns', 'lastRunAt'].includes(sort)
+      ? sort
+      : 'bestScore';
+
+    return Ranking.find()
+      .sort({ [sortField]: -1 })
+      .skip((parsedPage - 1) * parsedLimit)
+      .limit(parsedLimit)
+      .lean();
   }
 
   async function upsertResult({ userId, userName, isVictory, score }) {

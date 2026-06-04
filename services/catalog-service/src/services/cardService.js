@@ -1,8 +1,8 @@
 const { AppError } = require('../errors/AppError');
 
 function createCardService({ cardRepository }) {
-  async function listActive() {
-    return cardRepository.listActive();
+  async function listActive(options = {}) {
+    return cardRepository.listActive(options);
   }
 
   async function findById(id) {

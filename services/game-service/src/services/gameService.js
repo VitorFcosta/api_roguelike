@@ -1,7 +1,8 @@
 const { AppError } = require('../errors/AppError');
 
 const PLAYER_MAX_HP = 80;
-const BOSS_FLOOR = 5; // A batalha do boss ocorre no andar 5
+const COMMON_BATTLE_COUNT = 5;
+const BOSS_FLOOR = COMMON_BATTLE_COUNT + 1; // 5 batalhas comuns, depois boss
 
 function createGameService({
   runRepository,
@@ -43,8 +44,8 @@ function createGameService({
     });
   }
 
-  async function listRuns(userId) {
-    return runRepository.findByUserId(userId);
+  async function listRuns(userId, options = {}) {
+    return runRepository.findByUserId(userId, options);
   }
 
   async function getRunById(id, userId) {
@@ -137,14 +138,22 @@ function createGameService({
       playerHpAtStart: run.playerHp,
       playerCurrentHp: run.playerHp,
       playerBlock: 0,
-      turn: 1
+      turn: 1,
+      log: [`Batalha contra ${enemy.name} iniciada.`]
     });
   }
 
-  async function getBattleById(battleId) {
+  async function getBattleById(battleId, userId) {
     const battle = await battleRepository.findById(battleId);
     if (!battle) {
       throw new AppError(404, 'BATTLE_NOT_FOUND', 'Batalha não encontrada.');
+    }
+    const run = await runRepository.findById(battle.runId);
+    if (!run) {
+      throw new AppError(404, 'RUN_NOT_FOUND', 'Run não encontrada.');
+    }
+    if (run.userId !== userId) {
+      throw new AppError(403, 'FORBIDDEN', 'Acesso negado.');
     }
     return battle;
   }
@@ -178,6 +187,7 @@ function createGameService({
     }
 
     let { playerCurrentHp, playerBlock, enemyCurrentHp } = battle;
+    const log = [...(battle.log || [])];
 
     // ── Aplica efeito da carta ──
     if (card.type === 'attack') {
@@ -185,10 +195,15 @@ function createGameService({
       const blockedByEnemy = Math.min(rawDamage, battle.enemyDefense);
       const actualDamage = rawDamage - blockedByEnemy;
       enemyCurrentHp = Math.max(0, enemyCurrentHp - actualDamage);
+      log.push(`Jogador usou ${card.name} e causou ${actualDamage} de dano.`);
     } else if (card.type === 'block') {
       playerBlock += card.value;
+      log.push(`Jogador usou ${card.name} e ganhou ${card.value} de bloqueio.`);
     } else if (card.type === 'heal') {
+      const hpBeforeHeal = playerCurrentHp;
       playerCurrentHp = Math.min(run.playerMaxHp, playerCurrentHp + card.value);
+      const healed = playerCurrentHp - hpBeforeHeal;
+      log.push(`Jogador usou ${card.name} e recuperou ${healed} de HP.`);
     }
 
     // ── Ataque automático do inimigo ──
@@ -197,13 +212,22 @@ function createGameService({
       let enemyDamage = battle.enemyAttack;
 
       // Boss: a cada 3 turnos usa ataque especial
-      if (battle.type === 'boss' && battle.turn % 3 === 0) {
+      const usedSpecial = battle.type === 'boss' && battle.turn % 3 === 0;
+      if (usedSpecial) {
         enemyDamage = battle.enemySpecialAttack || battle.enemyAttack * 2;
       }
 
       const damageAfterBlock = Math.max(0, enemyDamage - playerBlock);
       playerCurrentHp = Math.max(0, playerCurrentHp - damageAfterBlock);
       playerBlock = Math.max(0, playerBlock - enemyDamage); // bloco se esgota
+
+      if (usedSpecial) {
+        log.push(`Boss usou ataque especial causando ${damageAfterBlock} de dano.`);
+      } else if (damageAfterBlock > 0) {
+        log.push(`Inimigo atacou causando ${damageAfterBlock} de dano.`);
+      } else {
+        log.push('Inimigo atacou, mas o bloqueio absorveu todo o dano.');
+      }
     }
 
     const playerDied = playerCurrentHp <= 0;
@@ -216,9 +240,11 @@ function createGameService({
     if (enemyDied) {
       battleStatus = 'victory';
       battleFinishedAt = new Date();
+      log.push('Inimigo derrotado.');
     } else if (playerDied) {
       battleStatus = 'defeat';
       battleFinishedAt = new Date();
+      log.push('Jogador derrotado.');
     }
 
     // Atualiza batalha
@@ -228,6 +254,7 @@ function createGameService({
       enemyCurrentHp,
       turn: nextTurn,
       status: battleStatus,
+      log,
       finishedAt: battleFinishedAt
     });
 
@@ -286,7 +313,15 @@ function createGameService({
   async function _generateReward(runId, battleId) {
     const cards = await catalogClient.getRewardCards(3);
 
-    const options = cards.map((c) => ({
+    if (!Array.isArray(cards) || cards.length < 3) {
+      throw new AppError(
+        503,
+        'INSUFFICIENT_REWARD_CARDS',
+        'Catálogo não possui 3 cartas de recompensa disponíveis.'
+      );
+    }
+
+    const options = cards.slice(0, 3).map((c) => ({
       cardId: c._id,
       name: c.name,
       type: c.type,

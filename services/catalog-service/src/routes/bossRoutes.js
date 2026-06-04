@@ -20,8 +20,8 @@ function createBossRoutes({ bossService }) {
 
   router.get(
     '/',
-    asyncHandler(async (_req, res) => {
-      const bosses = await bossService.listActive();
+    asyncHandler(async (req, res) => {
+      const bosses = await bossService.listActive(req.query);
       return sendSuccess(res, 200, bosses);
     })
   );

@@ -23,6 +23,12 @@ const REWARD_CARD = {
   _id: newId(), name: 'Fireball', type: 'attack', cost: 2, value: 12, rarity: 'rare'
 };
 
+const REWARD_CARDS = [
+  REWARD_CARD,
+  { _id: newId(), name: 'Shield Wall', type: 'block', cost: 2, value: 10, rarity: 'common' },
+  { _id: newId(), name: 'Greater Heal', type: 'heal', cost: 2, value: 12, rarity: 'rare' }
+];
+
 const WEAK_ENEMY = {
   _id: newId(), name: 'Slime', maxHp: 10, attack: 3, defense: 0, specialAttack: 0
 };
@@ -49,9 +55,16 @@ function makeStores() {
       return doc;
     },
     async findById(id) { return runs.get(String(id)) || null; },
-    async findByUserId(userId) {
-      return [...runs.values()].filter(r => r.userId === userId)
-        .sort((a, b) => b.createdAt - a.createdAt);
+    async findByUserId(userId, options = {}) {
+      let result = [...runs.values()].filter(r => r.userId === userId);
+      if (options.status) {
+        result = result.filter(r => r.status === options.status);
+      }
+      const limit = Number(options.limit) || result.length;
+      const page = Number(options.page) || 1;
+      return result
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice((page - 1) * limit, page * limit);
     },
     async findActiveByUserId(userId) {
       return [...runs.values()].find(r => r.userId === userId && r.status === 'active') || null;
@@ -116,7 +129,7 @@ function makeCatalogClient(overrides = {}) {
     ),
     getRandomEnemy: jest.fn().mockResolvedValue(WEAK_ENEMY),
     getRandomBoss:  jest.fn().mockResolvedValue(BOSS),
-    getRewardCards: jest.fn().mockResolvedValue([REWARD_CARD]),
+    getRewardCards: jest.fn().mockResolvedValue(REWARD_CARDS),
     ...overrides
   };
 }
@@ -204,6 +217,22 @@ describe('Usar carta de ataque', () => {
 
     // Dano aplicado: 6 (valor) - 0 (defesa do slime) = 6
     expect(updated.enemyCurrentHp).toBe(WEAK_ENEMY.maxHp - 6);
+  });
+
+  test('registra log da ação do jogador e do ataque do inimigo', async () => {
+    const { service } = makeService();
+    const run = await service.createRun(USER_ID);
+    const battle = await service.createBattle(run._id, USER_ID);
+    const attackCard = run.deck.find(c => c.type === 'attack');
+
+    const updated = await service.playCard(battle._id, attackCard.cardId, USER_ID);
+
+    expect(updated.log).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('Jogador usou Ataque Básico'),
+        expect.stringContaining('Inimigo atacou')
+      ])
+    );
   });
 });
 
@@ -309,7 +338,21 @@ describe('Gerar recompensa', () => {
     const reward = await service.getRewards(run._id, USER_ID);
 
     expect(reward.status).toBe('pending');
-    expect(reward.options.length).toBeGreaterThan(0);
+    expect(reward.options).toHaveLength(3);
+  });
+
+  test('falha com erro claro quando catálogo não retorna 3 cartas de recompensa', async () => {
+    const { service } = makeService({
+      getRewardCards: jest.fn().mockResolvedValue([REWARD_CARD])
+    });
+    const run = await service.createRun(USER_ID);
+    const battle = await service.createBattle(run._id, USER_ID);
+    const attackCard = run.deck.find(c => c.type === 'attack');
+
+    await service.playCard(battle._id, attackCard.cardId, USER_ID);
+
+    await expect(service.playCard(battle._id, attackCard.cardId, USER_ID))
+      .rejects.toMatchObject({ code: 'INSUFFICIENT_REWARD_CARDS' });
   });
 
   test('impede nova batalha enquanto há recompensa pendente', async () => {
@@ -399,7 +442,7 @@ describe('Finalizar run como derrota', () => {
     }
 
     expect(rankingClient.registerRunResult).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'defeat', userId: USER_ID })
+      expect.objectContaining({ status: 'defeat', userId: USER_ID, floor: 1 })
     );
   });
 });
@@ -419,9 +462,17 @@ describe('Finalizar run como vitória contra boss', () => {
     return { run, attackCard };
   }
 
-  test('batalha no andar 5 é do tipo boss', async () => {
+  test('batalha no andar 5 ainda é comum', async () => {
     const { service } = makeService();
     const { run } = await advanceToFloor(service, 5);
+    const battle = await service.createBattle(run._id, USER_ID);
+    expect(battle.type).toBe('common');
+    expect(battle.enemyName).toBe('Slime');
+  });
+
+  test('batalha no andar 6 é do tipo boss após 5 vitórias comuns', async () => {
+    const { service } = makeService();
+    const { run } = await advanceToFloor(service, 6);
     const battle = await service.createBattle(run._id, USER_ID);
     expect(battle.type).toBe('boss');
     expect(battle.enemyName).toBe('Dragon');
@@ -429,7 +480,7 @@ describe('Finalizar run como vitória contra boss', () => {
 
   test('vencer boss finaliza run como victory', async () => {
     const { service } = makeService();
-    const { run } = await advanceToFloor(service, 5);
+    const { run } = await advanceToFloor(service, 6);
     const battle = await service.createBattle(run._id, USER_ID);
     const attackCard = run.deck.find(c => c.type === 'attack');
 
@@ -455,7 +506,7 @@ describe('Finalizar run como vitória contra boss', () => {
     const run = await service.createRun(USER_ID);
     const attackCard = run.deck.find(c => c.type === 'attack');
 
-    for (let floor = 1; floor < 5; floor++) {
+    for (let floor = 1; floor < 6; floor++) {
       const battle = await service.createBattle(run._id, USER_ID);
       await service.playCard(battle._id, attackCard.cardId, USER_ID);
       await service.playCard(battle._id, attackCard.cardId, USER_ID);
@@ -518,6 +569,25 @@ describe('Impedir ação em run finalizada', () => {
   });
 });
 
+describe('Casos de erro do jogo', () => {
+  test('não retorna recompensa quando não há recompensa pendente', async () => {
+    const { service } = makeService();
+    const run = await service.createRun(USER_ID);
+
+    await expect(service.getRewards(run._id, USER_ID))
+      .rejects.toMatchObject({ code: 'REWARD_NOT_FOUND' });
+  });
+
+  test('não permite jogar carta que não está no deck', async () => {
+    const { service } = makeService();
+    const run = await service.createRun(USER_ID);
+    const battle = await service.createBattle(run._id, USER_ID);
+
+    await expect(service.playCard(battle._id, newId(), USER_ID))
+      .rejects.toMatchObject({ code: 'CARD_NOT_IN_DECK' });
+  });
+});
+
 describe('Histórico de runs', () => {
   test('retorna todas as runs do usuário', async () => {
     const { service } = makeService();
@@ -536,5 +606,74 @@ describe('Histórico de runs', () => {
 
     const runs2 = await service.listRuns(USER2_ID);
     expect(runs2).toHaveLength(0);
+  });
+
+  test('filtra histórico de runs por status', async () => {
+    const { service } = makeService();
+    const abandoned = await service.createRun(USER_ID);
+    await service.abandonRun(abandoned._id, USER_ID);
+    await service.createRun(USER_ID);
+
+    const runs = await service.listRuns(USER_ID, { status: 'abandoned' });
+
+    expect(runs).toHaveLength(1);
+    expect(runs[0].status).toBe('abandoned');
+  });
+});
+
+describe('Segurança de consulta de batalha', () => {
+  test('usuário não pode consultar run de outro usuário', async () => {
+    const { service } = makeService();
+    const run = await service.createRun(USER_ID);
+
+    await expect(service.getRunById(run._id, USER2_ID))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  test('usuário não pode consultar batalha de run de outro usuário', async () => {
+    const { service } = makeService();
+    const run = await service.createRun(USER_ID);
+    const battle = await service.createBattle(run._id, USER_ID);
+
+    await expect(service.getBattleById(battle._id, USER2_ID))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  test('usuário não pode jogar carta em batalha de outro usuário', async () => {
+    const { service } = makeService();
+    const run = await service.createRun(USER_ID);
+    const battle = await service.createBattle(run._id, USER_ID);
+    const attackCard = run.deck.find(c => c.type === 'attack');
+
+    await expect(service.playCard(battle._id, attackCard.cardId, USER2_ID))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  test('usuário não pode consultar recompensa de run de outro usuário', async () => {
+    const { service } = makeService();
+    const run = await service.createRun(USER_ID);
+    const battle = await service.createBattle(run._id, USER_ID);
+    const attackCard = run.deck.find(c => c.type === 'attack');
+
+    await service.playCard(battle._id, attackCard.cardId, USER_ID);
+    await service.playCard(battle._id, attackCard.cardId, USER_ID);
+
+    await expect(service.getRewards(run._id, USER2_ID))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  test('usuário não pode escolher recompensa de outro usuário', async () => {
+    const { service } = makeService();
+    const run = await service.createRun(USER_ID);
+    const battle = await service.createBattle(run._id, USER_ID);
+    const attackCard = run.deck.find(c => c.type === 'attack');
+
+    await service.playCard(battle._id, attackCard.cardId, USER_ID);
+    await service.playCard(battle._id, attackCard.cardId, USER_ID);
+
+    const reward = await service.getRewards(run._id, USER_ID);
+
+    await expect(service.chooseReward(reward._id, reward.options[0].cardId, USER2_ID))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 });

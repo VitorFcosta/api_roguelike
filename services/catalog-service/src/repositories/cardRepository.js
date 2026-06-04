@@ -1,9 +1,35 @@
 const { Card } = require('../models/Card');
 
+function parsePagination({ limit = 50, page = 1 } = {}) {
+  const parsedLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+  const parsedPage = Math.max(Number(page) || 1, 1);
+  return { limit: parsedLimit, skip: (parsedPage - 1) * parsedLimit };
+}
+
+function parseSort(sort = 'createdAt') {
+  const allowed = ['createdAt', 'name', 'type', 'rarity', 'cost', 'value'];
+  const direction = String(sort).startsWith('-') ? -1 : 1;
+  const field = String(sort).replace(/^-/, '');
+  return { [allowed.includes(field) ? field : 'createdAt']: direction };
+}
+
 function createCardRepository() {
   return {
-    async listActive() {
-      return Card.find({ isActive: true }).sort({ createdAt: 1 });
+    async listActive(options = {}) {
+      const { limit, skip } = parsePagination(options);
+      const query = { isActive: true };
+
+      if (options.name) query.name = { $regex: options.name, $options: 'i' };
+      if (options.type) query.type = options.type;
+      if (options.rarity) query.rarity = options.rarity;
+      if (options.isStarter !== undefined) {
+        query.isStarter = String(options.isStarter) === 'true';
+      }
+
+      return Card.find(query)
+        .sort(parseSort(options.sort))
+        .skip(skip)
+        .limit(limit);
     },
 
     async findById(id) {

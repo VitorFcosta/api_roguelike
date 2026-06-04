@@ -20,8 +20,8 @@ function createEnemyRoutes({ enemyService }) {
 
   router.get(
     '/',
-    asyncHandler(async (_req, res) => {
-      const enemies = await enemyService.listActive();
+    asyncHandler(async (req, res) => {
+      const enemies = await enemyService.listActive(req.query);
       return sendSuccess(res, 200, enemies);
     })
   );

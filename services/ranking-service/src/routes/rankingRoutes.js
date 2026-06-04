@@ -6,17 +6,30 @@ const { requireGatewayAuth } = require('../middlewares/requireGatewayAuth');
 function createRankingRoutes({ rankingService }) {
   const router = express.Router();
 
+  async function registerRunResult(req, res) {
+    const { userId, userName, status, result, floor, score, runId } = req.body;
+    const parsedScore = typeof score === 'number' ? score : undefined;
+    const resultData = await rankingService.registerRunResult({
+      userId,
+      userName,
+      status,
+      result,
+      floor,
+      score: parsedScore,
+      runId
+    });
+    return sendSuccess(res, 200, resultData);
+  }
+
+  router.post('/ranking/events/run-finished', asyncHandler(registerRunResult));
+
   // Rota interna chamada pelo game-service ao finalizar run
   // Não exige gateway auth pois é chamada internamente
-  router.post('/rankings', asyncHandler(async (req, res) => {
-    const { userId, userName, status, floor } = req.body;
-    const result = await rankingService.registerRunResult({ userId, userName, status, floor });
-    return sendSuccess(res, 200, result);
-  }));
+  router.post('/rankings', asyncHandler(registerRunResult));
 
   // Ranking geral - requer autenticação via gateway
-  router.get('/ranking', requireGatewayAuth, asyncHandler(async (_req, res) => {
-    const ranking = await rankingService.getGlobalRanking();
+  router.get('/ranking', requireGatewayAuth, asyncHandler(async (req, res) => {
+    const ranking = await rankingService.getGlobalRanking(req.query);
     return sendSuccess(res, 200, ranking);
   }));
 

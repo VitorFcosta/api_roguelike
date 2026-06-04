@@ -73,6 +73,10 @@ const battleSchema = new mongoose.Schema(
       default: 1,
       min: 1
     },
+    log: {
+      type: [String],
+      default: []
+    },
     finishedAt: {
       type: Date,
       default: null

@@ -13,7 +13,7 @@ function createBattleRoutes({ gameService }) {
     requireGatewayAuth,
     validateObjectId,
     asyncHandler(async (req, res) => {
-      const battle = await gameService.getBattleById(req.params.id);
+      const battle = await gameService.getBattleById(req.params.id, req.user.id);
       return sendSuccess(res, 200, battle);
     })
   );
