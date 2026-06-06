@@ -211,6 +211,12 @@ db.runs
   .sort({ createdAt: -1 })
 ```
 
+Observacao importante para a apresentacao:
+
+- A `Run` guarda o estado da tentativa: `status`, `floor`, HP, deck e data de finalizacao.
+- O score final nao fica como campo principal da `Run`.
+- Quando a run termina, o resultado alimenta a colecao `rankings`, principalmente o campo `bestScore`.
+
 ## Exemplo: Battle
 
 Uma batalha pertence a uma run.
@@ -328,6 +334,15 @@ db.rankings
   .limit(limit)
 ```
 
+Ordenacoes suportadas pela API:
+
+- `bestScore`
+- `victories`
+- `totalRuns`
+- `lastRunAt`
+
+O ranking tem paginacao por `page` e `limit`. Nao trate "filtro por periodo" como funcionalidade atual, porque isso nao esta implementado no codigo.
+
 ## Indices principais
 
 | Colecao | Indice | Motivo |
@@ -350,4 +365,3 @@ db.rankings
 Use esta frase:
 
 > O catalogo guarda os modelos editaveis de cartas, inimigos e bosses. Quando uma run ou batalha acontece, copiamos os dados principais como snapshot para preservar o historico do jogo. Assim, uma carta alterada pelo admin nao muda uma run antiga.
-

@@ -1,0 +1,80 @@
+flowchart TB
+  %% Diagrama recomendado para Slide 11 ou apoio de Docker/Deploy.
+
+  dev["Desenvolvedor<br/>docker compose up --build -d"]
+
+  subgraph host["Maquina local"]
+    direction TB
+
+    subgraph public["Portas expostas no localhost"]
+      direction LR
+      gatewayPort["API Gateway<br/>localhost:3000"]
+      swaggerPort["Swagger<br/>localhost:3000/docs"]
+      prometheusPort["Prometheus<br/>localhost:9090"]
+      grafanaPort["Grafana<br/>localhost:3005"]
+    end
+
+    subgraph compose["Rede Docker Compose"]
+      direction LR
+
+      gateway["api-gateway<br/>container"]
+
+      subgraph apiServices["Servicos Node.js"]
+        direction TB
+        auth["auth-service<br/>porta interna 3001"]
+        catalog["catalog-service<br/>porta interna 3002"]
+        game["game-service<br/>porta interna 3003"]
+        ranking["ranking-service<br/>porta interna 3004"]
+      end
+
+      mongodb[("mongodb<br/>volume mongodb-data")]
+      prometheus["prometheus<br/>coleta metricas"]
+      grafana["grafana<br/>dashboard provisionado"]
+    end
+  end
+
+  dev --> host
+
+  gatewayPort --> gateway
+  swaggerPort --> gateway
+  prometheusPort --> prometheus
+  grafanaPort --> grafana
+
+  gateway --> auth
+  gateway --> catalog
+  gateway --> game
+  gateway --> ranking
+
+  game --> catalog
+  game --> ranking
+
+  auth --> mongodb
+  catalog --> mongodb
+  game --> mongodb
+  ranking --> mongodb
+
+  prometheus -.-> gateway
+  prometheus -.-> auth
+  prometheus -.-> catalog
+  prometheus -.-> game
+  prometheus -.-> ranking
+  grafana --> prometheus
+
+  classDef commandClass fill:#eef7ff,stroke:#1f6feb,stroke-width:1px,color:#0f172a;
+  classDef portClass fill:#f8fafc,stroke:#64748b,stroke-width:1px,color:#0f172a;
+  classDef gatewayClass fill:#0f5132,stroke:#0f5132,stroke-width:2px,color:#ffffff;
+  classDef serviceClass fill:#ecfdf3,stroke:#17803d,stroke-width:1px,color:#0f172a;
+  classDef databaseClass fill:#fff7ed,stroke:#f97316,stroke-width:2px,color:#0f172a;
+  classDef observabilityClass fill:#f5f3ff,stroke:#7c3aed,stroke-width:1px,color:#0f172a;
+
+  class dev commandClass;
+  class gatewayPort,swaggerPort,prometheusPort,grafanaPort portClass;
+  class gateway gatewayClass;
+  class auth,catalog,game,ranking serviceClass;
+  class mongodb databaseClass;
+  class prometheus,grafana observabilityClass;
+
+  style host fill:#ffffff,stroke:#cbd5e1,stroke-width:1px,color:#0f172a
+  style public fill:#ffffff,stroke:#cbd5e1,stroke-width:1px,color:#0f172a
+  style compose fill:#ffffff,stroke:#cbd5e1,stroke-width:1px,color:#0f172a
+  style apiServices fill:#ffffff,stroke:#cbd5e1,stroke-width:1px,color:#0f172a
