@@ -8,10 +8,10 @@ flowchart TB
 
     subgraph public["Portas expostas no localhost"]
       direction LR
-      gatewayPort["API Gateway<br/>localhost:3000"]
-      swaggerPort["Swagger<br/>localhost:3000/docs"]
-      prometheusPort["Prometheus<br/>localhost:9090"]
-      grafanaPort["Grafana<br/>localhost:3005"]
+      gatewayPort["API Gateway<br/>localhost:${API_GATEWAY_HOST_PORT}"]
+      swaggerPort["Swagger<br/>localhost:${API_GATEWAY_HOST_PORT}/docs"]
+      prometheusPort["Prometheus<br/>localhost:${PROMETHEUS_PORT}"]
+      grafanaPort["Grafana<br/>localhost:${GRAFANA_PORT}"]
     end
 
     subgraph compose["Rede Docker Compose"]

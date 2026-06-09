@@ -1,4 +1,5 @@
 const express = require('express');
+const helmet = require('helmet');
 
 const { loadConfig } = require('./config/env');
 const { createCardRepository } = require('./repositories/cardRepository');
@@ -15,10 +16,7 @@ const { sendSuccess } = require('./utils/responses');
 const { createMetrics } = require('./utils/metrics');
 
 function createApp(options = {}) {
-  const hasInjectedRepositories =
-    options.cardRepository && options.enemyRepository && options.bossRepository;
-
-  const config = options.config || (hasInjectedRepositories ? {} : loadConfig());
+  const config = options.config || loadConfig();
 
   const cardRepository = options.cardRepository || createCardRepository();
   const enemyRepository = options.enemyRepository || createEnemyRepository();
@@ -31,7 +29,9 @@ function createApp(options = {}) {
   const { metricsMiddleware, metricsEndpoint } = createMetrics('catalog_service');
   const app = express();
 
-  app.use(express.json());
+  app.disable('x-powered-by');
+  app.use(helmet());
+  app.use(express.json({ limit: '100kb' }));
   app.use(metricsMiddleware);
 
   app.get('/health', (_req, res) => {
@@ -44,9 +44,9 @@ function createApp(options = {}) {
 
   app.get('/metrics', metricsEndpoint);
 
-  app.use('/cards', createCardRoutes({ cardService }));
-  app.use('/enemies', createEnemyRoutes({ enemyService }));
-  app.use('/bosses', createBossRoutes({ bossService }));
+  app.use('/cards', createCardRoutes({ cardService, config }));
+  app.use('/enemies', createEnemyRoutes({ enemyService, config }));
+  app.use('/bosses', createBossRoutes({ bossService, config }));
 
   app.use(errorHandler);
 

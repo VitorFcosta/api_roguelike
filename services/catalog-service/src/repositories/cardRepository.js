@@ -1,4 +1,5 @@
 const { Card } = require('../models/Card');
+const { buildNameRegexFilter } = require('../utils/queryFilters');
 
 function parsePagination({ limit = 50, page = 1 } = {}) {
   const parsedLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
@@ -19,7 +20,8 @@ function createCardRepository() {
       const { limit, skip } = parsePagination(options);
       const query = { isActive: true };
 
-      if (options.name) query.name = { $regex: options.name, $options: 'i' };
+      const nameFilter = buildNameRegexFilter(options.name);
+      if (nameFilter) query.name = nameFilter;
       if (options.type) query.type = options.type;
       if (options.rarity) query.rarity = options.rarity;
       if (options.isStarter !== undefined) {

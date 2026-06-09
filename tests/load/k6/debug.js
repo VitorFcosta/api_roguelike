@@ -7,11 +7,13 @@ export const options = {
 };
 
 const BASE_URL = 'http://localhost:3000/v1';
+const ADMIN_EMAIL = __ENV.ADMIN_EMAIL || 'admin@email.com';
+const ADMIN_PASSWORD = __ENV.ADMIN_PASSWORD || 'senha-admin-forte-12345';
 
 export default function () {
   const res = http.post(
     `${BASE_URL}/auth/login`,
-    JSON.stringify({ email: 'admin@email.com', password: 'admin123456' }),
+    JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD }),
     { headers: { 'Content-Type': 'application/json' } }
   );
 

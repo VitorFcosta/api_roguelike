@@ -6,6 +6,8 @@
     "services/*"
   ],
   "scripts": {
+    "up": "docker compose up --build -d && npm run ports",
+    "ports": "node scripts/showPorts.js",
     "test": "npm run test --workspaces --if-present",
     "test:auth": "npm run test --workspace services/auth-service",
     "test:gateway": "npm run test --workspace services/api-gateway"

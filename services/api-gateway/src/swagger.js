@@ -186,7 +186,7 @@ const swaggerDocument = {
                 properties: {
                   name: { type: 'string', example: 'Ana Souza' },
                   email: { type: 'string', example: 'ana@email.com' },
-                  password: { type: 'string', example: 'senha123' }
+                  password: { type: 'string', example: 'senha-forte-12345' }
                 }
               }
             }
@@ -213,7 +213,7 @@ const swaggerDocument = {
                 required: ['email', 'password'],
                 properties: {
                   email: { type: 'string', example: 'admin@email.com' },
-                  password: { type: 'string', example: 'admin123456' }
+                  password: { type: 'string', example: 'senha-admin-forte-12345' }
                 }
               }
             }

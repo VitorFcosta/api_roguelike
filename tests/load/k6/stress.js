@@ -19,7 +19,7 @@ export const options = {
 
 const BASE_URL = 'http://localhost:3000/v1';
 const USER_COUNT = 30;
-const PASSWORD = 'senha123';
+const PASSWORD = __ENV.LOAD_PASSWORD || 'senha-forte-12345';
 
 function jsonHeaders(token) {
   const headers = { 'Content-Type': 'application/json' };

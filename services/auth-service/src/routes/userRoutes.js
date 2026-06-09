@@ -6,12 +6,13 @@ const { asyncHandler } = require('../utils/asyncHandler');
 const { sendSuccess } = require('../utils/responses');
 const { toSafeUser } = require('../utils/userPresenter');
 
-function createUserRoutes({ userRepository }) {
+function createUserRoutes({ userRepository, config }) {
   const router = express.Router();
+  const gatewayAuth = requireGatewayAuth(config);
 
   router.get(
     '/me',
-    requireGatewayAuth,
+    gatewayAuth,
     asyncHandler(async (req, res) => {
       const user = await userRepository.findById(req.user.id);
 
@@ -25,7 +26,7 @@ function createUserRoutes({ userRepository }) {
 
   router.get(
     '/',
-    requireGatewayAuth,
+    gatewayAuth,
     requireRole('admin'),
     asyncHandler(async (_req, res) => {
       const users = await userRepository.listActive();

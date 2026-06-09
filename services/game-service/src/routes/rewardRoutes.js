@@ -4,13 +4,14 @@ const { sendSuccess } = require('../utils/responses');
 const { requireGatewayAuth } = require('../middlewares/requireGatewayAuth');
 const { validateObjectId } = require('../middlewares/validateObjectId');
 
-function createRewardRoutes({ gameService }) {
+function createRewardRoutes({ gameService, config }) {
   const router = express.Router();
+  const gatewayAuth = requireGatewayAuth(config);
 
   // POST /rewards/:id/choose — escolhe uma carta da recompensa
   router.post(
     '/:id/choose',
-    requireGatewayAuth,
+    gatewayAuth,
     validateObjectId,
     asyncHandler(async (req, res) => {
       const { cardId } = req.body;

@@ -1,251 +1,368 @@
 # API Roguelike de Cartas
 
-API REST para um jogo de cartas roguelike simplificado, inspirado em Slay the Spire.
+Backend REST para um jogo de cartas roguelike simplificado, inspirado em jogos como Slay the Spire. O jogador cria uma run, enfrenta batalhas, escolhe recompensas, vence ou perde a tentativa e tem o resultado refletido no ranking.
 
-Desenvolvida com Node.js, arquitetura em microserviços, MongoDB, Docker, JWT, Prometheus, Grafana e documentação Swagger.
+Este projeto foi criado como estudo prático de arquitetura em microserviços com Node.js, Docker, MongoDB, autenticação JWT, observabilidade com Prometheus/Grafana e testes automatizados.
 
----
+## Sumário
 
-## Requisitos
+- [Visão geral](#visão-geral)
+- [Funcionalidades](#funcionalidades)
+- [Arquitetura](#arquitetura)
+- [Modelagem dos dados](#modelagem-dos-dados)
+- [Stack](#stack)
+- [Pré-requisitos](#pré-requisitos)
+- [Configuração](#configuração)
+- [Como executar](#como-executar)
+- [URLs do ambiente local](#urls-do-ambiente-local)
+- [Fluxo principal](#fluxo-principal)
+- [Documentação da API](#documentação-da-api)
+- [Testes](#testes)
+- [Observabilidade](#observabilidade)
+- [Segurança](#segurança)
+- [Estrutura do projeto](#estrutura-do-projeto)
+- [Comandos úteis](#comandos-úteis)
+- [Documentos técnicos](#documentos-técnicos)
+- [Licença](#licença)
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop) instalado e rodando
-- [k6](https://k6.io/docs/get-started/installation/) instalado (para testes de carga)
+## Visão geral
 
----
+A API é organizada em microserviços. O cliente nunca chama os serviços diretamente; toda requisição pública entra pelo `api-gateway`, que valida autenticação, aplica rate limit e encaminha a chamada para o serviço correto.
 
-## Como subir o ambiente
+O jogo tem uma regra central: cada usuário pode ter uma run ativa por vez. Durante a run, ele enfrenta 5 batalhas comuns, escolhe recompensas entre batalhas e depois enfrenta o boss no `floor` 6. Ao vencer, perder ou abandonar, o resultado alimenta o ranking.
 
-### 1. Clone o repositório
+## Funcionalidades
 
-```bash
-git clone <url-do-repositorio>
-cd api_roguelike
+- Cadastro e login de usuários.
+- Autenticação com JWT.
+- Controle de acesso por perfil `user` e `admin`.
+- CRUD administrativo de cartas, inimigos e bosses.
+- Soft delete no catálogo.
+- Criação e consulta de runs.
+- Criação de batalhas.
+- Ação de jogar carta em batalha.
+- Escolha de recompensa.
+- Ranking global e estatísticas do usuário.
+- Swagger para testar a API.
+- Métricas Prometheus e dashboard Grafana.
+- Testes unitários/integrados com Jest e Supertest.
+- Testes de carga com k6.
+
+## Arquitetura
+
+A visão geral abaixo mostra o papel do gateway, dos microserviços, do MongoDB e da observabilidade.
+
+![Arquitetura lógica da API Roguelike de Cartas](docs/diagrams/architecture-logical.svg)
+
+| Serviço | Responsabilidade |
+|---|---|
+| `api-gateway` | Entrada pública da API, JWT, CORS, rate limit, Swagger e proxy |
+| `auth-service` | Cadastro, login, usuários e seed do admin |
+| `catalog-service` | Catálogo de cartas, inimigos e bosses |
+| `game-service` | Runs, batalhas, recompensas e regras do jogo |
+| `ranking-service` | Ranking global e estatísticas do jogador |
+| `mongodb` | Persistência dos dados |
+| `prometheus` | Coleta de métricas |
+| `grafana` | Visualização das métricas |
+
+Fluxo resumido:
+
+```text
+Cliente/k6/Swagger
+  -> api-gateway
+    -> auth-service
+    -> catalog-service
+    -> game-service
+      -> catalog-service
+      -> ranking-service
+    -> ranking-service
+  -> MongoDB
+Prometheus -> /metrics dos serviços
+Grafana -> Prometheus
 ```
 
-### 2. Suba todos os containers
+Veja mais detalhes em [docs/architecture.md](docs/architecture.md).
+
+## Modelagem dos dados
+
+O projeto usa MongoDB com Mongoose. A modelagem mistura dois conceitos:
+
+- **Referência**: um documento aponta para outro, como `Battle.runId`.
+- **Snapshot**: o jogo copia dados importantes para preservar o estado histórico, como cartas dentro do deck da run e dados do inimigo dentro da batalha.
+
+Isso é importante porque o catálogo pode mudar depois. Se o admin editar uma carta, uma run antiga continua mostrando a carta como ela era naquele momento.
+
+| Coleção | Serviço | Papel |
+|---|---|---|
+| `users` | `auth-service` | Usuários, email, senha hasheada e perfil |
+| `cards` | `catalog-service` | Cartas do catálogo |
+| `enemies` | `catalog-service` | Inimigos comuns |
+| `bosses` | `catalog-service` | Bosses |
+| `runs` | `game-service` | Tentativas do jogador, HP, floor, deck e status |
+| `battles` | `game-service` | Estado da batalha e log de ações |
+| `rewards` | `game-service` | Opções de recompensa e carta escolhida |
+| `rankings` | `ranking-service` | Estatísticas agregadas por usuário |
+
+O diagrama ER completo e exemplos de documentos ficam em [docs/mongodb-modeling.md](docs/mongodb-modeling.md).
+
+## Stack
+
+- Node.js
+- Express
+- MongoDB
+- Mongoose
+- Docker Compose
+- JWT
+- bcrypt
+- Zod
+- Helmet
+- Prometheus
+- Grafana
+- Jest
+- Supertest
+- k6
+
+## Pré-requisitos
+
+- Docker Desktop instalado e rodando.
+- Node.js e npm instalados para usar scripts locais.
+- k6 instalado apenas se você quiser rodar testes de carga.
+
+## Configuração
+
+Crie o `.env` local a partir do exemplo:
 
 ```bash
-docker compose up --build -d
+cp .env.example .env
 ```
 
-Aguarde todos os serviços ficarem saudáveis:
+Depois edite o `.env`. Os valores abaixo precisam ser trocados antes de subir o ambiente:
+
+| Variável | Para que serve |
+|---|---|
+| `JWT_SECRET` | Segredo usado para assinar tokens JWT |
+| `INTERNAL_SERVICE_SECRET` | Segredo usado entre gateway e microserviços |
+| `ADMIN_SEED_PASSWORD` | Senha do usuário admin criado pelo seed |
+| `GRAFANA_PASSWORD` | Senha do usuário do Grafana |
+
+As portas públicas também ficam no `.env`:
+
+| Variável | Padrão | Serviço |
+|---|---:|---|
+| `API_GATEWAY_HOST_PORT` | `3000` | API Gateway e Swagger |
+| `PROMETHEUS_PORT` | `9090` | Prometheus |
+| `GRAFANA_PORT` | `3005` | Grafana |
+
+Para gerar segredos fortes:
+
+```bash
+openssl rand -base64 32
+```
+
+Use um valor diferente para `JWT_SECRET` e `INTERNAL_SERVICE_SECRET`.
+
+## Como executar
+
+Suba todos os containers:
+
+```bash
+npm run up
+```
+
+Esse comando executa `docker compose up --build -d` e imprime as portas principais no terminal.
+
+Se você já subiu o ambiente e quer apenas rever as portas:
+
+```bash
+npm run ports
+```
+
+Aguarde os serviços ficarem saudáveis:
 
 ```bash
 docker compose ps
 ```
 
-Todos devem aparecer como `healthy`.
-
-### 3. Execute os seeds
+Execute os seeds:
 
 ```bash
 docker compose exec auth-service npm run seed:admin
 docker compose exec catalog-service npm run seed:catalog
 ```
 
----
+## URLs do ambiente local
 
-## URLs disponíveis
+Com os valores padrão do `.env.example`:
 
-| Recurso     | URL                        |
-|-------------|----------------------------|
-| API Gateway | http://localhost:3000      |
-| Swagger     | http://localhost:3000/docs |
-| Prometheus  | http://localhost:9090      |
-| Grafana     | http://localhost:3005      |
+| Recurso | URL |
+|---|---|
+| API Gateway | `http://localhost:3000` |
+| Swagger | `http://localhost:3000/docs` |
+| Prometheus | `http://localhost:9090` |
+| Grafana | `http://localhost:3005` |
 
----
+Se você mudar as portas no `.env`, rode:
 
-## Credenciais padrão
+```bash
+npm run ports
+```
 
-| Serviço     | Usuário          | Senha       |
-|-------------|------------------|-------------|
-| Admin da API | admin@email.com | admin123456 |
-| Grafana     | admin            | admin       |
+## Fluxo principal
 
----
+1. `POST /v1/auth/register` cadastra usuário.
+2. `POST /v1/auth/login` retorna o JWT.
+3. `POST /v1/runs` cria uma run.
+4. `POST /v1/runs/:id/battles` cria uma batalha.
+5. `POST /v1/battles/:id/actions/play-card` joga uma carta.
+6. `POST /v1/rewards/:id/choose` escolhe uma recompensa.
+7. Depois de 5 vitórias comuns, o próximo combate é o boss.
+8. Ao finalizar a run, o ranking é atualizado.
+9. `GET /v1/ranking` consulta o ranking global.
 
 ## Documentação da API
 
-Acesse o Swagger em **http://localhost:3000/docs** para visualizar e testar todos os endpoints.
+Acesse o Swagger:
 
-> Observação: o projeto usa `/docs`; a rota `/api-docs` não é utilizada.
+```text
+http://localhost:${API_GATEWAY_HOST_PORT}/docs
+```
 
-Para testar rotas protegidas no Swagger:
-1. Execute `POST /auth/login` com as credenciais do admin
-2. Copie o token retornado
-3. Clique em **Authorize** no topo direito
-4. Cole o token e confirme
+Com a porta padrão:
 
-Documentos locais:
+```text
+http://localhost:3000/docs
+```
 
-| Documento | Conteúdo |
-|-----------|----------|
-| `docs/requirements.md` | Requisitos e regras de negócio |
-| `docs/sdd.md` | Desenho técnico dos serviços |
-| `docs/mongodb-modeling.md` | Modelos MongoDB |
-| `docs/api-endpoints.md` | Rotas públicas e internas |
-| `docs/architecture.md` | Mapa da arquitetura |
+Para testar rotas protegidas:
 
----
+1. Execute `POST /auth/login`.
+2. Copie o token retornado.
+3. Clique em `Authorize` no Swagger.
+4. Cole o token no formato `Bearer <token>`.
 
-## Testes de carga com k6
+Resumo dos grupos de endpoints:
 
-O projeto possui seis scripts k6 na pasta `tests/load/k6/`:
+| Grupo | Rotas |
+|---|---|
+| Auth | `/auth/register`, `/auth/login`, `/users/me`, `/users` |
+| Catálogo | `/cards`, `/enemies`, `/bosses` |
+| Jogo | `/runs`, `/battles`, `/rewards` |
+| Ranking | `/ranking`, `/ranking/me` |
+| Infra | `/health`, `/metrics` |
 
-| Script | Descrição |
-|--------|-----------|
-| `main.js` | Teste de carga geral com múltiplos usuários simultâneos |
-| `ranking.js` | Fluxo completo: login, run, batalhas, boss e ranking |
-| `stress.js` | Teste de stress para observar rate limit, latência e erros sob carga maior |
-| `populate.js` | Cadastra 8 jogadores e faz runs para popular o ranking |
-| `debug.js` | Debug simples de login com 1 usuário |
-| `debug2.js` | Debug de login com 5 usuários simultâneos |
+Veja a lista completa em [docs/api-endpoints.md](docs/api-endpoints.md).
 
-### Teste de carga geral
+## Testes
+
+Rodar todos os testes automatizados:
+
+```bash
+npm test
+```
+
+Rodar apenas alguns workspaces:
+
+```bash
+npm run test:auth
+npm run test:gateway
+```
+
+Testes de carga com k6:
 
 ```bash
 k6 run tests/load/k6/main.js
-```
-
-### Fluxo completo de uma run com ranking
-
-```bash
 k6 run tests/load/k6/ranking.js
-```
-
-### Teste de stress
-
-```bash
 k6 run tests/load/k6/stress.js
-```
-
-Esse teste aumenta a carga gradualmente e conta respostas `429 RATE_LIMIT_EXCEEDED` como comportamento esperado de stress. O objetivo é descobrir quando o limite original do gateway começa a atuar.
-
-### Popular ranking com múltiplos jogadores
-
-```bash
 k6 run tests/load/k6/populate.js
 ```
 
-Acompanhe os resultados no Grafana em http://localhost:3005 enquanto os testes rodam.
-
----
+Os scripts de k6 usam `http://localhost:3000/v1` por padrão.
 
 ## Observabilidade
 
-### Prometheus
+Todos os serviços expõem:
 
-Coleta métricas de todos os serviços a cada 15 segundos. Acesse http://localhost:9090.
+- `/health`
+- `/metrics`
 
-Exemplo de query útil:
-```
+Prometheus coleta métricas dos serviços a cada 15 segundos. Grafana usa o Prometheus como datasource e já possui dashboard provisionado.
+
+Query útil no Prometheus:
+
+```text
 rate(api_gateway_http_requests_total[1m])
 ```
 
-### Grafana
+## Segurança
 
-Acesse http://localhost:3005 com usuário `admin` e senha `admin`.
+Cuidados implementados:
 
-O datasource do Prometheus e o dashboard **Roguelike API Overview** já vêm configurados automaticamente.
+- JWT com `issuer`, `audience` e algoritmo HS256.
+- Senhas armazenadas com bcrypt.
+- Senha de cadastro entre 12 e 72 caracteres.
+- Rate limit no gateway.
+- `helmet` nos apps Express.
+- Remoção do header `x-powered-by`.
+- Limite de JSON em `100kb`.
+- Autorização por perfil.
+- Comunicação interna protegida por `INTERNAL_SERVICE_SECRET`.
+- Serviços internos não são publicados diretamente no host.
+- Portas públicas do Compose ficam presas em `127.0.0.1`.
 
----
+Cuidados que você deve manter:
 
-## Health checks
-
-Todos os serviços expõem `/health`:
-
-```bash
-curl http://localhost:3000/health
-```
-
----
-
-## Métricas
-
-Todos os serviços expõem `/metrics` no formato Prometheus:
-
-```bash
-curl http://localhost:3000/metrics
-```
-
----
-
-## Comandos úteis
-
-```bash
-# Rodar testes automatizados
-npm test
-
-# Ver status dos containers
-docker compose ps
-
-# Ver logs de um serviço
-docker compose logs api-gateway
-docker compose logs game-service
-docker compose logs ranking-service
-
-# Ver logs em tempo real
-docker compose logs -f
-
-# Reconstruir um serviço específico
-docker compose up --build -d ranking-service
-
-# Parar o ambiente
-docker compose down
-
-# Parar e remover volumes (apaga dados do banco)
-docker compose down -v
-```
-
----
+- Não commitar `.env`.
+- Não reutilizar `JWT_SECRET` e `INTERNAL_SERVICE_SECRET`.
+- Não usar senhas de exemplo em produção.
+- Não expor Grafana e Prometheus publicamente sem proteção extra.
 
 ## Estrutura do projeto
 
-```
-/
+```text
+.
 ├── services/
-│   ├── api-gateway/        Entrada única da API, Swagger e roteamento
-│   ├── auth-service/       Cadastro, login e JWT
-│   ├── catalog-service/    Cartas, inimigos e bosses
-│   ├── game-service/       Runs, batalhas e recompensas
-│   └── ranking-service/    Ranking e estatísticas
+│   ├── api-gateway/
+│   ├── auth-service/
+│   ├── catalog-service/
+│   ├── game-service/
+│   └── ranking-service/
 ├── monitoring/
-│   ├── prometheus/         Configuração de coleta de métricas
-│   └── grafana/            Datasource e dashboard provisionados automaticamente
+│   ├── prometheus/
+│   └── grafana/
 ├── tests/
-│   └── load/k6/            Scripts de teste de carga
-├── docs/                   Documentação técnica local
+│   └── load/k6/
+├── docs/
+├── scripts/
+│   └── showPorts.js
 ├── docker-compose.yml
+├── package.json
 ├── .env.example
 └── README.md
 ```
 
----
+## Comandos úteis
 
-## Serviços e portas
+| Comando | Uso |
+|---|---|
+| `npm run up` | Sobe containers e mostra portas |
+| `npm run ports` | Mostra URLs e portas configuradas |
+| `npm test` | Roda testes dos workspaces |
+| `docker compose ps` | Mostra status dos containers |
+| `docker compose logs -f` | Mostra logs em tempo real |
+| `docker compose logs -f api-gateway` | Mostra logs do gateway |
+| `docker compose down` | Para o ambiente |
+| `docker compose down -v` | Para e apaga volumes |
 
-| Serviço         | Porta interna | Porta externa |
-|-----------------|---------------|---------------|
-| api-gateway     | 3000          | 3000          |
-| auth-service    | 3001          | —             |
-| catalog-service | 3002          | —             |
-| game-service    | 3003          | —             |
-| ranking-service | 3004          | —             |
-| mongodb         | 27017         | —             |
-| prometheus      | 9090          | 9090          |
-| grafana         | 3000          | 3005          |
+## Documentos técnicos
 
----
+| Documento | Conteúdo |
+|---|---|
+| [docs/requirements.md](docs/requirements.md) | Requisitos e regras de negócio |
+| [docs/sdd.md](docs/sdd.md) | Desenho técnico dos serviços |
+| [docs/mongodb-modeling.md](docs/mongodb-modeling.md) | Modelagem MongoDB |
+| [docs/api-endpoints.md](docs/api-endpoints.md) | Rotas públicas e internas |
+| [docs/architecture.md](docs/architecture.md) | Arquitetura e diagramas |
 
-## Fluxo principal da API
+## Licença
 
-1. `POST /v1/auth/register` — Cadastrar usuário
-2. `POST /v1/auth/login` — Fazer login e obter JWT
-3. `POST /v1/runs` — Iniciar uma run
-4. `POST /v1/runs/:id/battles` — Criar batalha
-5. `POST /v1/battles/:id/actions/play-card` — Usar carta
-6. `POST /v1/rewards/:id/choose` — Escolher recompensa
-7. `GET /v1/ranking` — Consultar ranking
-
-Uma run usa os status `active`, `victory`, `defeat` e `abandoned`. O fluxo completo tem 5 batalhas comuns antes do boss.
+Licença ainda não definida neste repositório.

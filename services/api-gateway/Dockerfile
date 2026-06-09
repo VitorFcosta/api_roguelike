@@ -5,8 +5,10 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install --omit=dev
 
-COPY src ./src
+COPY --chown=node:node src ./src
 
 EXPOSE 3000
 
-CMD ["npm", "start"]
+USER node
+
+CMD ["node", "src/server.js"]

@@ -18,6 +18,8 @@ export const options = {
 };
 
 const BASE_URL = 'http://localhost:3000/v1';
+const ADMIN_EMAIL = __ENV.ADMIN_EMAIL || 'admin@email.com';
+const ADMIN_PASSWORD = __ENV.ADMIN_PASSWORD || 'senha-admin-forte-12345';
 const TOTAL_ITERATIONS = 5;
 const RATE_LIMIT_WAIT_SECONDS = 65;
 const TEST_CARD_NAME = 'K6 Victory Blade';
@@ -247,7 +249,7 @@ export default function () {
     'POST',
     '/auth/login',
     null,
-    { email: 'admin@email.com', password: 'admin123456' },
+    { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
     'login'
   );
 

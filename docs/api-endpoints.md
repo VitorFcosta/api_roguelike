@@ -3,13 +3,15 @@
 Base publica:
 
 ```text
-http://localhost:3000/v1
+http://localhost:${API_GATEWAY_HOST_PORT}/v1
 ```
+
+Com o `.env.example`, `API_GATEWAY_HOST_PORT=3000`, entao a base local fica `http://localhost:3000/v1`.
 
 Swagger:
 
 ```text
-http://localhost:3000/docs
+http://localhost:${API_GATEWAY_HOST_PORT}/docs
 ```
 
 ## Auth
@@ -69,7 +71,7 @@ Rota interna entre servicos:
 
 - `POST /ranking/events/run-finished`
 
-Essa rota interna existe no `ranking-service`, mas nao e exposta publicamente pelo gateway.
+Essa rota interna existe no `ranking-service`, mas nao e exposta publicamente pelo gateway. Ela exige o header `X-Internal-Service-Secret`, cujo valor vem de `INTERNAL_SERVICE_SECRET`.
 
 ## Infra
 
@@ -78,3 +80,7 @@ Sem prefixo `/v1`:
 - `GET /health`
 - `GET /metrics`
 
+Prometheus e Grafana ficam fora do prefixo da API e usam portas publicas configuradas no `.env`:
+
+- Prometheus: `http://localhost:${PROMETHEUS_PORT}`
+- Grafana: `http://localhost:${GRAFANA_PORT}`

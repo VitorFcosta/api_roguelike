@@ -34,6 +34,7 @@ function loadConfig() {
     jwtIssuer: process.env.JWT_ISSUER || 'roguelike-api',
     jwtAudience: process.env.JWT_AUDIENCE || 'roguelike-client',
     jwtExpiresIn: process.env.JWT_EXPIRES_IN || '1h',
+    internalServiceSecret: required('INTERNAL_SERVICE_SECRET'),
     bcryptSaltRounds: numberFromEnv('BCRYPT_SALT_ROUNDS', 10),
     adminSeedName: process.env.ADMIN_SEED_NAME || 'Admin',
     adminSeedEmail: process.env.ADMIN_SEED_EMAIL,

@@ -1,4 +1,5 @@
 const express = require('express');
+const helmet = require('helmet');
 
 const { loadConfig } = require('./config/env');
 const { createRunRepository } = require('./repositories/runRepository');
@@ -15,10 +16,7 @@ const { sendSuccess } = require('./utils/responses');
 const { createMetrics } = require('./utils/metrics');
 
 function createApp(options = {}) {
-  const hasInjectedDeps =
-    options.runRepository && options.battleRepository && options.rewardRepository;
-
-  const config = options.config || (hasInjectedDeps ? {} : loadConfig());
+  const config = options.config || loadConfig();
 
   const runRepository = options.runRepository || createRunRepository();
   const battleRepository = options.battleRepository || createBattleRepository();
@@ -27,7 +25,10 @@ function createApp(options = {}) {
   const catalogClient =
     options.catalogClient || createCatalogClient(config.catalogServiceUrl);
   const rankingClient =
-    options.rankingClient || createRankingClient(config.rankingServiceUrl);
+    options.rankingClient || createRankingClient({
+      baseUrl: config.rankingServiceUrl,
+      internalServiceSecret: config.internalServiceSecret
+    });
 
   const gameService = createGameService({
     runRepository,
@@ -39,7 +40,9 @@ function createApp(options = {}) {
 
   const { metricsMiddleware, metricsEndpoint } = createMetrics('game_service');
   const app = express();
-  app.use(express.json());
+  app.disable('x-powered-by');
+  app.use(helmet());
+  app.use(express.json({ limit: '100kb' }));
   app.use(metricsMiddleware);
 
   app.get('/health', (_req, res) => {
@@ -52,9 +55,9 @@ function createApp(options = {}) {
 
   app.get('/metrics', metricsEndpoint);
 
-  app.use('/runs', createRunRoutes({ gameService }));
-  app.use('/battles', createBattleRoutes({ gameService }));
-  app.use('/rewards', createRewardRoutes({ gameService }));
+  app.use('/runs', createRunRoutes({ gameService, config }));
+  app.use('/battles', createBattleRoutes({ gameService, config }));
+  app.use('/rewards', createRewardRoutes({ gameService, config }));
 
   app.use(errorHandler);
 

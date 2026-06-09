@@ -17,6 +17,7 @@ export const options = {
 
 const BASE_URL = 'http://localhost:3000/v1';
 const RATE_LIMIT_WAIT_SECONDS = 65;
+const LOAD_PASSWORD = __ENV.LOAD_PASSWORD || 'senha-forte-12345';
 
 function jsonHeaders(token) {
   const headers = { 'Content-Type': 'application/json' };
@@ -70,7 +71,7 @@ function getLoadUser() {
   return {
     name: `K6 Main VU ${__VU}`,
     email: `k6-main-vu-${__VU}@roguelike.local`,
-    password: 'senha123',
+    password: LOAD_PASSWORD,
   };
 }
 

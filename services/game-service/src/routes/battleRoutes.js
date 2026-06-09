@@ -4,13 +4,14 @@ const { sendSuccess } = require('../utils/responses');
 const { requireGatewayAuth } = require('../middlewares/requireGatewayAuth');
 const { validateObjectId } = require('../middlewares/validateObjectId');
 
-function createBattleRoutes({ gameService }) {
+function createBattleRoutes({ gameService, config }) {
   const router = express.Router();
+  const gatewayAuth = requireGatewayAuth(config);
 
   // GET /battles/:id — estado da batalha
   router.get(
     '/:id',
-    requireGatewayAuth,
+    gatewayAuth,
     validateObjectId,
     asyncHandler(async (req, res) => {
       const battle = await gameService.getBattleById(req.params.id, req.user.id);
@@ -21,7 +22,7 @@ function createBattleRoutes({ gameService }) {
   // POST /battles/:id/actions/play-card — usa uma carta na batalha
   router.post(
     '/:id/actions/play-card',
-    requireGatewayAuth,
+    gatewayAuth,
     validateObjectId,
     asyncHandler(async (req, res) => {
       const { cardId } = req.body;

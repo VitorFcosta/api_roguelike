@@ -4,13 +4,14 @@ const { sendSuccess } = require('../utils/responses');
 const { requireGatewayAuth } = require('../middlewares/requireGatewayAuth');
 const { validateObjectId } = require('../middlewares/validateObjectId');
 
-function createRunRoutes({ gameService }) {
+function createRunRoutes({ gameService, config }) {
   const router = express.Router();
+  const gatewayAuth = requireGatewayAuth(config);
 
   // POST /runs — cria nova run
   router.post(
     '/',
-    requireGatewayAuth,
+    gatewayAuth,
     asyncHandler(async (req, res) => {
       const run = await gameService.createRun(req.user.id);
       return sendSuccess(res, 201, run);
@@ -20,7 +21,7 @@ function createRunRoutes({ gameService }) {
   // GET /runs — histórico de runs do usuário
   router.get(
     '/',
-    requireGatewayAuth,
+    gatewayAuth,
     asyncHandler(async (req, res) => {
       const runs = await gameService.listRuns(req.user.id, req.query);
       return sendSuccess(res, 200, runs);
@@ -30,7 +31,7 @@ function createRunRoutes({ gameService }) {
   // GET /runs/:id — detalhes de uma run
   router.get(
     '/:id',
-    requireGatewayAuth,
+    gatewayAuth,
     validateObjectId,
     asyncHandler(async (req, res) => {
       const run = await gameService.getRunById(req.params.id, req.user.id);
@@ -41,7 +42,7 @@ function createRunRoutes({ gameService }) {
   // POST /runs/:id/battles — inicia batalha na run
   router.post(
     '/:id/battles',
-    requireGatewayAuth,
+    gatewayAuth,
     validateObjectId,
     asyncHandler(async (req, res) => {
       const battle = await gameService.createBattle(req.params.id, req.user.id);
@@ -52,7 +53,7 @@ function createRunRoutes({ gameService }) {
   // GET /runs/:id/rewards — recompensa pendente da run
   router.get(
     '/:id/rewards',
-    requireGatewayAuth,
+    gatewayAuth,
     validateObjectId,
     asyncHandler(async (req, res) => {
       const reward = await gameService.getRewards(req.params.id, req.user.id);
@@ -63,7 +64,7 @@ function createRunRoutes({ gameService }) {
   // POST /runs/:id/abandon — abandona a run
   router.post(
     '/:id/abandon',
-    requireGatewayAuth,
+    gatewayAuth,
     validateObjectId,
     asyncHandler(async (req, res) => {
       const run = await gameService.abandonRun(req.params.id, req.user.id);

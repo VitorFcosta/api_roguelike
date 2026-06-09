@@ -7,8 +7,9 @@ const { validateObjectId } = require('../middlewares/validateObjectId');
 const { requireGatewayAuth, requireRole } = require('../middlewares/requireGatewayAuth');
 const { createEnemySchema, updateEnemySchema } = require('../validators/enemyValidators');
 
-function createEnemyRoutes({ enemyService }) {
+function createEnemyRoutes({ enemyService, config }) {
   const router = express.Router();
+  const gatewayAuth = requireGatewayAuth(config);
 
   router.get(
     '/random',
@@ -37,7 +38,7 @@ function createEnemyRoutes({ enemyService }) {
 
   router.post(
     '/',
-    requireGatewayAuth,
+    gatewayAuth,
     requireRole('admin'),
     validate(createEnemySchema),
     asyncHandler(async (req, res) => {
@@ -48,7 +49,7 @@ function createEnemyRoutes({ enemyService }) {
 
   router.put(
     '/:id',
-    requireGatewayAuth,
+    gatewayAuth,
     requireRole('admin'),
     validateObjectId,
     validate(updateEnemySchema),
@@ -60,7 +61,7 @@ function createEnemyRoutes({ enemyService }) {
 
   router.delete(
     '/:id',
-    requireGatewayAuth,
+    gatewayAuth,
     requireRole('admin'),
     validateObjectId,
     asyncHandler(async (req, res) => {

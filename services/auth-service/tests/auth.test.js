@@ -3,6 +3,8 @@ const jwt = require('jsonwebtoken');
 
 const { createApp } = require('../src/app');
 
+const STRONG_PASSWORD = 'senha-forte-12345';
+
 function createMemoryUserRepository() {
   const users = [];
   let nextId = 1;
@@ -39,6 +41,7 @@ function createTestConfig() {
     jwtIssuer: 'roguelike-api',
     jwtAudience: 'roguelike-client',
     jwtExpiresIn: '1h',
+    internalServiceSecret: 'test_internal_secret',
     bcryptSaltRounds: 4
   };
 }
@@ -57,7 +60,7 @@ describe('auth-service', () => {
   test('register creates a user role and stores a password hash', async () => {
     const response = await request(app)
       .post('/auth/register')
-      .send({ name: 'Ana Souza', email: 'ana@email.com', password: '123456' });
+      .send({ name: 'Ana Souza', email: 'ana@email.com', password: STRONG_PASSWORD });
 
     expect(response.status).toBe(201);
     expect(response.body).toMatchObject({
@@ -70,17 +73,17 @@ describe('auth-service', () => {
     });
     expect(response.body.data.passwordHash).toBeUndefined();
     expect(repository.users[0].passwordHash).toBeDefined();
-    expect(repository.users[0].passwordHash).not.toBe('123456');
+    expect(repository.users[0].passwordHash).not.toBe(STRONG_PASSWORD);
   });
 
   test('register rejects duplicated email with 409', async () => {
     await request(app)
       .post('/auth/register')
-      .send({ name: 'Ana Souza', email: 'ana@email.com', password: '123456' });
+      .send({ name: 'Ana Souza', email: 'ana@email.com', password: STRONG_PASSWORD });
 
     const response = await request(app)
       .post('/auth/register')
-      .send({ name: 'Ana Souza', email: 'ana@email.com', password: '123456' });
+      .send({ name: 'Ana Souza', email: 'ana@email.com', password: STRONG_PASSWORD });
 
     expect(response.status).toBe(409);
     expect(response.body).toEqual({
@@ -95,11 +98,11 @@ describe('auth-service', () => {
   test('login with valid password returns a signed JWT', async () => {
     await request(app)
       .post('/auth/register')
-      .send({ name: 'Ana Souza', email: 'ana@email.com', password: '123456' });
+      .send({ name: 'Ana Souza', email: 'ana@email.com', password: STRONG_PASSWORD });
 
     const response = await request(app)
       .post('/auth/login')
-      .send({ email: 'ana@email.com', password: '123456' });
+      .send({ email: 'ana@email.com', password: STRONG_PASSWORD });
 
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
@@ -117,7 +120,7 @@ describe('auth-service', () => {
   test('login with wrong password returns 401', async () => {
     await request(app)
       .post('/auth/register')
-      .send({ name: 'Ana Souza', email: 'ana@email.com', password: '123456' });
+      .send({ name: 'Ana Souza', email: 'ana@email.com', password: STRONG_PASSWORD });
 
     const response = await request(app)
       .post('/auth/login')
@@ -138,7 +141,8 @@ describe('auth-service', () => {
     const response = await request(app)
       .get('/users/me')
       .set('X-User-Id', '1')
-      .set('X-User-Role', 'user');
+      .set('X-User-Role', 'user')
+      .set('X-Internal-Service-Secret', config.internalServiceSecret);
 
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({
@@ -170,14 +174,16 @@ describe('auth-service', () => {
     const forbidden = await request(app)
       .get('/users')
       .set('X-User-Id', '1')
-      .set('X-User-Role', 'user');
+      .set('X-User-Role', 'user')
+      .set('X-Internal-Service-Secret', config.internalServiceSecret);
 
     expect(forbidden.status).toBe(403);
 
     const allowed = await request(app)
       .get('/users')
       .set('X-User-Id', '2')
-      .set('X-User-Role', 'admin');
+      .set('X-User-Role', 'admin')
+      .set('X-Internal-Service-Secret', config.internalServiceSecret);
 
     expect(allowed.status).toBe(200);
     expect(allowed.body.data).toHaveLength(2);

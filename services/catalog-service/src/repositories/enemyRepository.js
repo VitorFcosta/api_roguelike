@@ -1,4 +1,5 @@
 const { Enemy } = require('../models/Enemy');
+const { buildNameRegexFilter } = require('../utils/queryFilters');
 
 function parsePagination({ limit = 50, page = 1 } = {}) {
   const parsedLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
@@ -19,7 +20,8 @@ function createEnemyRepository() {
       const { limit, skip } = parsePagination(options);
       const query = { isActive: true };
 
-      if (options.name) query.name = { $regex: options.name, $options: 'i' };
+      const nameFilter = buildNameRegexFilter(options.name);
+      if (nameFilter) query.name = nameFilter;
       if (options.difficulty) query.difficulty = Number(options.difficulty);
 
       return Enemy.find(query)

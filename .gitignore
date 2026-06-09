@@ -5,3 +5,11 @@ coverage/
 .env.*
 !.env.example
 npm-debug.log*
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+id_rsa
+id_dsa
+.npmrc

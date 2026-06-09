@@ -5,9 +5,11 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install --omit=dev
 
-COPY src ./src
-COPY scripts ./scripts
+COPY --chown=node:node src ./src
+COPY --chown=node:node scripts ./scripts
 
 EXPOSE 3001
 
-CMD ["npm", "start"]
+USER node
+
+CMD ["node", "src/server.js"]

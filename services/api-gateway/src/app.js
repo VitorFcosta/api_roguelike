@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const swaggerUi = require('swagger-ui-express');
 
@@ -15,14 +16,14 @@ const { sendError, sendSuccess } = require('./utils/responses');
 const { createMetrics } = require('./utils/metrics');
 const { swaggerDocument } = require('./swagger');
 
-function createForwardHandler({ baseUrl, forwarder }) {
+function createForwardHandler({ baseUrl, forwarder, config }) {
   return async (req, res, next) => {
     try {
       const result = await forwarder({
         baseUrl,
         path: req.originalUrl.replace(/^\/v1/, ''),
         method: req.method,
-        headers: buildForwardHeaders(req),
+        headers: buildForwardHeaders(req, config),
         body: req.body,
         requestId: req.requestId
       });
@@ -44,16 +45,18 @@ function createApp(options = {}) {
   const app = express();
   const auth = authenticateJwt(config);
 
-  const forwardToAuth    = createForwardHandler({ baseUrl: config.authServiceUrl,    forwarder });
-  const forwardToCatalog = createForwardHandler({ baseUrl: config.catalogServiceUrl, forwarder });
-  const forwardToGame    = createForwardHandler({ baseUrl: config.gameServiceUrl,    forwarder });
-  const forwardToRanking = createForwardHandler({ baseUrl: config.rankingServiceUrl, forwarder });
+  const forwardToAuth    = createForwardHandler({ baseUrl: config.authServiceUrl,    forwarder, config });
+  const forwardToCatalog = createForwardHandler({ baseUrl: config.catalogServiceUrl, forwarder, config });
+  const forwardToGame    = createForwardHandler({ baseUrl: config.gameServiceUrl,    forwarder, config });
+  const forwardToRanking = createForwardHandler({ baseUrl: config.rankingServiceUrl, forwarder, config });
 
   const { metricsMiddleware, metricsEndpoint } = createMetrics('api_gateway');
 
+  app.disable('x-powered-by');
   app.use(requestId);
+  app.use(helmet({ contentSecurityPolicy: false }));
   app.use(cors({ origin: config.corsOrigin }));
-  app.use(express.json());
+  app.use(express.json({ limit: '100kb' }));
   app.use(metricsMiddleware);
 
   if (config.rateLimitEnabled !== false) {

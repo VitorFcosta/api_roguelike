@@ -13,6 +13,7 @@ function createTestConfig() {
     jwtSecret: 'test_secret_for_gateway',
     jwtIssuer: 'roguelike-api',
     jwtAudience: 'roguelike-client',
+    internalServiceSecret: 'test_internal_secret',
     corsOrigin: 'http://localhost:3000',
     rateLimitWindowMs: 60000,
     rateLimitMax: 100,
@@ -91,7 +92,8 @@ describe('api-gateway', () => {
       headers: expect.objectContaining({
         'x-request-id': 'req-123',
         'x-user-id': 'user-1',
-        'x-user-role': 'user'
+        'x-user-role': 'user',
+        'x-internal-service-secret': config.internalServiceSecret
       })
     }));
   });

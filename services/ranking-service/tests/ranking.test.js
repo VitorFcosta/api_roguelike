@@ -4,7 +4,16 @@ const { createApp } = require('../src/app');
 
 const USER_HEADERS = {
   'X-User-Id': 'user-001',
-  'X-User-Role': 'user'
+  'X-User-Role': 'user',
+  'X-Internal-Service-Secret': 'test_internal_secret'
+};
+
+const INTERNAL_HEADERS = {
+  'X-Internal-Service-Secret': 'test_internal_secret'
+};
+
+const TEST_CONFIG = {
+  internalServiceSecret: 'test_internal_secret'
 };
 
 function createMemoryRankingRepository() {
@@ -51,12 +60,13 @@ describe('ranking-service', () => {
   let app;
 
   beforeEach(() => {
-    app = createApp({ rankingRepository: createMemoryRankingRepository() });
+    app = createApp({ rankingRepository: createMemoryRankingRepository(), config: TEST_CONFIG });
   });
 
   test('POST /ranking/events/run-finished registra vitória pela rota interna oficial', async () => {
     const response = await request(app)
       .post('/ranking/events/run-finished')
+      .set(INTERNAL_HEADERS)
       .send({
         userId: 'user-001',
         userName: 'Ana Souza',
@@ -77,9 +87,39 @@ describe('ranking-service', () => {
     });
   });
 
+  test('POST /ranking/events/run-finished sem segredo interno retorna 401', async () => {
+    const response = await request(app)
+      .post('/ranking/events/run-finished')
+      .send({
+        userId: 'user-001',
+        status: 'victory',
+        floor: 6
+      });
+
+    expect(response.status).toBe(401);
+    expect(response.body.error.code).toBe('INTERNAL_AUTH_REQUIRED');
+  });
+
+  test('POST /ranking/events/run-finished ignora score enviado no body', async () => {
+    const response = await request(app)
+      .post('/ranking/events/run-finished')
+      .set(INTERNAL_HEADERS)
+      .send({
+        userId: 'user-003',
+        userName: 'Score Forjado',
+        status: 'victory',
+        floor: 2,
+        score: 999999
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.bestScore).toBe(200);
+  });
+
   test('POST /rankings continua funcionando como alias temporário', async () => {
     const response = await request(app)
       .post('/rankings')
+      .set(INTERNAL_HEADERS)
       .send({
         userId: 'user-002',
         userName: 'Bruno',
@@ -100,9 +140,11 @@ describe('ranking-service', () => {
   test('GET /ranking respeita limit e ordena por bestScore', async () => {
     await request(app)
       .post('/ranking/events/run-finished')
+      .set(INTERNAL_HEADERS)
       .send({ userId: 'low', userName: 'Low', status: 'defeat', floor: 2 });
     await request(app)
       .post('/ranking/events/run-finished')
+      .set(INTERNAL_HEADERS)
       .send({ userId: 'high', userName: 'High', status: 'victory', floor: 6 });
 
     const response = await request(app)
@@ -134,6 +176,7 @@ describe('ranking-service', () => {
   test('GET /ranking/me reflete derrota registrada para o usuário', async () => {
     await request(app)
       .post('/ranking/events/run-finished')
+      .set(INTERNAL_HEADERS)
       .send({
         userId: 'user-001',
         userName: 'Jogador Derrotado',

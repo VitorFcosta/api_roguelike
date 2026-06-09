@@ -107,10 +107,10 @@ flowchart TB
 
     subgraph public["Portas expostas no localhost"]
       direction LR
-      gatewayPort["API Gateway<br/>localhost:3000"]
-      swaggerPort["Swagger<br/>localhost:3000/docs"]
-      prometheusPort["Prometheus<br/>localhost:9090"]
-      grafanaPort["Grafana<br/>localhost:3005"]
+      gatewayPort["API Gateway<br/>localhost:${API_GATEWAY_HOST_PORT}"]
+      swaggerPort["Swagger<br/>localhost:${API_GATEWAY_HOST_PORT}/docs"]
+      prometheusPort["Prometheus<br/>localhost:${PROMETHEUS_PORT}"]
+      grafanaPort["Grafana<br/>localhost:${GRAFANA_PORT}"]
     end
 
     subgraph compose["Rede Docker Compose"]
@@ -183,7 +183,7 @@ flowchart TB
 
 Use esta fala curta:
 
-> O cliente nunca chama os microservicos diretamente. Toda requisicao entra pelo api-gateway, que valida JWT, aplica CORS/rate limit e encaminha para o servico correto. O game-service conversa internamente com o catalog-service para buscar cartas, inimigos e bosses, e envia um evento ao ranking-service quando a run termina. Todos persistem no MongoDB. Em paralelo, Prometheus coleta metricas dos servicos e Grafana exibe o dashboard.
+> O cliente nunca chama os microservicos diretamente. Toda requisicao entra pelo api-gateway, que valida JWT, aplica CORS/rate limit e encaminha para o servico correto usando tambem o segredo interno `INTERNAL_SERVICE_SECRET`. O game-service conversa internamente com o catalog-service para buscar cartas, inimigos e bosses, e envia um evento ao ranking-service quando a run termina. Todos persistem no MongoDB. Em paralelo, Prometheus coleta metricas dos servicos e Grafana exibe o dashboard.
 
 ## Fluxo de uma run
 

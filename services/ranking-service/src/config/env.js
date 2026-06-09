@@ -29,7 +29,8 @@ function numberFromEnv(name, fallback) {
 function loadConfig() {
   return {
     port: numberFromEnv('RANKING_SERVICE_PORT', numberFromEnv('PORT', 3004)),
-    mongoUri: required('MONGO_URI')
+    mongoUri: required('MONGO_URI'),
+    internalServiceSecret: required('INTERNAL_SERVICE_SECRET')
   };
 }
 

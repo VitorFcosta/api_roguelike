@@ -31,7 +31,9 @@ A API Roguelike de Cartas oferece o backend de um jogo simplificado inspirado em
 - Filtros, paginacao e ordenacao nas listagens planejadas.
 - Autenticacao JWT.
 - Controle de acesso por perfil.
+- Segredo interno obrigatorio entre gateway e microservicos para aceitar headers `X-User-Id` e `X-User-Role`.
+- Senhas de cadastro devem ter entre 12 e 72 caracteres.
 - Rate limit no gateway.
 - Swagger para documentacao.
 - Health check e metricas Prometheus.
-
+- Portas publicas de API, Prometheus e Grafana devem ser configuraveis por `.env`.

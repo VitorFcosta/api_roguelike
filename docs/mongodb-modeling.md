@@ -216,6 +216,7 @@ Observacao importante para a apresentacao:
 - A `Run` guarda o estado da tentativa: `status`, `floor`, HP, deck e data de finalizacao.
 - O score final nao fica como campo principal da `Run`.
 - Quando a run termina, o resultado alimenta a colecao `rankings`, principalmente o campo `bestScore`.
+- O `ranking-service` calcula o score no servidor a partir de `status` e `floor`; ele nao aceita `score` arbitrario enviado no payload.
 
 ## Exemplo: Battle
 

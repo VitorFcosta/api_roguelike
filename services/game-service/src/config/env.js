@@ -31,7 +31,8 @@ function loadConfig() {
     port: numberFromEnv('GAME_SERVICE_PORT', numberFromEnv('PORT', 3003)),
     mongoUri: required('MONGO_URI'),
     catalogServiceUrl: process.env.CATALOG_SERVICE_URL || 'http://catalog-service:3002',
-    rankingServiceUrl: process.env.RANKING_SERVICE_URL || 'http://ranking-service:3004'
+    rankingServiceUrl: process.env.RANKING_SERVICE_URL || 'http://ranking-service:3004',
+    internalServiceSecret: required('INTERNAL_SERVICE_SECRET')
   };
 }
 

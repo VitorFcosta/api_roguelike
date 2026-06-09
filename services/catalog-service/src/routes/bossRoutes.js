@@ -7,8 +7,9 @@ const { validateObjectId } = require('../middlewares/validateObjectId');
 const { requireGatewayAuth, requireRole } = require('../middlewares/requireGatewayAuth');
 const { createBossSchema, updateBossSchema } = require('../validators/bossValidators');
 
-function createBossRoutes({ bossService }) {
+function createBossRoutes({ bossService, config }) {
   const router = express.Router();
+  const gatewayAuth = requireGatewayAuth(config);
 
   router.get(
     '/random',
@@ -37,7 +38,7 @@ function createBossRoutes({ bossService }) {
 
   router.post(
     '/',
-    requireGatewayAuth,
+    gatewayAuth,
     requireRole('admin'),
     validate(createBossSchema),
     asyncHandler(async (req, res) => {
@@ -48,7 +49,7 @@ function createBossRoutes({ bossService }) {
 
   router.put(
     '/:id',
-    requireGatewayAuth,
+    gatewayAuth,
     requireRole('admin'),
     validateObjectId,
     validate(updateBossSchema),
@@ -60,7 +61,7 @@ function createBossRoutes({ bossService }) {
 
   router.delete(
     '/:id',
-    requireGatewayAuth,
+    gatewayAuth,
     requireRole('admin'),
     validateObjectId,
     asyncHandler(async (req, res) => {

@@ -13,17 +13,20 @@ export const options = {
 };
 
 const BASE_URL = 'http://localhost:3000/v1';
+const LOAD_PASSWORD = __ENV.LOAD_PASSWORD || 'senha-forte-12345';
+const ADMIN_EMAIL = __ENV.ADMIN_EMAIL || 'admin@email.com';
+const ADMIN_PASSWORD = __ENV.ADMIN_PASSWORD || 'senha-admin-forte-12345';
 
 // 8 jogadores com nomes diferentes
 const PLAYERS = [
-  { name: 'Arthur Silva',   email: 'arthur@roguelike.com',  password: 'senha123' },
-  { name: 'Beatriz Costa',  email: 'beatriz@roguelike.com', password: 'senha123' },
-  { name: 'Carlos Mendes',  email: 'carlos@roguelike.com',  password: 'senha123' },
-  { name: 'Diana Ferreira', email: 'diana@roguelike.com',   password: 'senha123' },
-  { name: 'Eduardo Lima',   email: 'eduardo@roguelike.com', password: 'senha123' },
-  { name: 'Fernanda Rocha', email: 'fernanda@roguelike.com',password: 'senha123' },
-  { name: 'Gabriel Nunes',  email: 'gabriel@roguelike.com', password: 'senha123' },
-  { name: 'Helena Souza',   email: 'helena@roguelike.com',  password: 'senha123' },
+  { name: 'Arthur Silva',   email: 'arthur@roguelike.com',  password: LOAD_PASSWORD },
+  { name: 'Beatriz Costa',  email: 'beatriz@roguelike.com', password: LOAD_PASSWORD },
+  { name: 'Carlos Mendes',  email: 'carlos@roguelike.com',  password: LOAD_PASSWORD },
+  { name: 'Diana Ferreira', email: 'diana@roguelike.com',   password: LOAD_PASSWORD },
+  { name: 'Eduardo Lima',   email: 'eduardo@roguelike.com', password: LOAD_PASSWORD },
+  { name: 'Fernanda Rocha', email: 'fernanda@roguelike.com',password: LOAD_PASSWORD },
+  { name: 'Gabriel Nunes',  email: 'gabriel@roguelike.com', password: LOAD_PASSWORD },
+  { name: 'Helena Souza',   email: 'helena@roguelike.com',  password: LOAD_PASSWORD },
 ];
 
 function jsonHeaders(token) {
@@ -232,7 +235,7 @@ export default function () {
   // Login como admin para ver ranking
   const adminLogin = http.post(
     `${BASE_URL}/auth/login`,
-    JSON.stringify({ email: 'admin@email.com', password: 'admin123456' }),
+    JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD }),
     { headers: jsonHeaders() }
   );
 

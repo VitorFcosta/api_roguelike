@@ -183,7 +183,22 @@ function createMemoryBossRepository() {
 
 const ADMIN_HEADERS = {
   'X-User-Id': 'user-1',
-  'X-User-Role': 'admin'
+  'X-User-Role': 'admin',
+  'X-Internal-Service-Secret': 'test_internal_secret'
+};
+
+const USER_HEADERS = {
+  'X-User-Id': 'user-1',
+  'X-User-Role': 'user',
+  'X-Internal-Service-Secret': 'test_internal_secret'
+};
+
+const INTERNAL_HEADERS = {
+  'X-Internal-Service-Secret': 'test_internal_secret'
+};
+
+const TEST_CONFIG = {
+  internalServiceSecret: 'test_internal_secret'
 };
 
 const validCard = {
@@ -228,7 +243,7 @@ describe('catalog-service', () => {
     cardRepository = createMemoryCardRepository();
     enemyRepository = createMemoryEnemyRepository();
     bossRepository = createMemoryBossRepository();
-    app = createApp({ cardRepository, enemyRepository, bossRepository });
+    app = createApp({ cardRepository, enemyRepository, bossRepository, config: TEST_CONFIG });
   });
 
   // ----------------------------------------------------------
@@ -672,13 +687,23 @@ describe('catalog-service', () => {
     const response = await request(app).post('/cards').send(validCard);
 
     expect(response.status).toBe(401);
+    expect(response.body.error.code).toBe('INTERNAL_AUTH_REQUIRED');
+  });
+
+  test('POST /cards com segredo interno mas sem usuario retorna 401', async () => {
+    const response = await request(app)
+      .post('/cards')
+      .set(INTERNAL_HEADERS)
+      .send(validCard);
+
+    expect(response.status).toBe(401);
     expect(response.body.error.code).toBe('AUTH_REQUIRED');
   });
 
   test('POST /cards com usuário comum retorna 403', async () => {
     const response = await request(app)
       .post('/cards')
-      .set({ 'X-User-Id': 'user-1', 'X-User-Role': 'user' })
+      .set(USER_HEADERS)
       .send(validCard);
 
     expect(response.status).toBe(403);
@@ -688,7 +713,7 @@ describe('catalog-service', () => {
   test('POST /enemies com usuário comum retorna 403', async () => {
     const response = await request(app)
       .post('/enemies')
-      .set({ 'X-User-Id': 'user-1', 'X-User-Role': 'user' })
+      .set(USER_HEADERS)
       .send(validEnemy);
 
     expect(response.status).toBe(403);
@@ -698,7 +723,7 @@ describe('catalog-service', () => {
   test('POST /bosses com usuário comum retorna 403', async () => {
     const response = await request(app)
       .post('/bosses')
-      .set({ 'X-User-Id': 'user-1', 'X-User-Role': 'user' })
+      .set(USER_HEADERS)
       .send(validBoss);
 
     expect(response.status).toBe(403);

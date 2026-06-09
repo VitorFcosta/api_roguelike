@@ -1,9 +1,12 @@
-function createRankingClient(baseUrl) {
+function createRankingClient({ baseUrl, internalServiceSecret }) {
   async function registerRunResult({ userId, runId, status, floor }) {
     try {
       await fetch(`${baseUrl}/ranking/events/run-finished`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Internal-Service-Secret': internalServiceSecret
+        },
         body: JSON.stringify({ userId, runId, status, floor })
       });
     } catch {

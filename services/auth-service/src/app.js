@@ -1,4 +1,5 @@
 const express = require('express');
+const helmet = require('helmet');
 
 const { loadConfig } = require('./config/env');
 const { createUserRepository } = require('./repositories/userRepository');
@@ -16,7 +17,9 @@ function createApp(options = {}) {
   const { metricsMiddleware, metricsEndpoint } = createMetrics('auth_service');
   const app = express();
 
-  app.use(express.json());
+  app.disable('x-powered-by');
+  app.use(helmet());
+  app.use(express.json({ limit: '100kb' }));
   app.use(metricsMiddleware);
 
   app.get('/health', (_req, res) => {
@@ -30,7 +33,7 @@ function createApp(options = {}) {
   app.get('/metrics', metricsEndpoint);
 
   app.use('/auth', createAuthRoutes({ authService }));
-  app.use('/users', createUserRoutes({ userRepository }));
+  app.use('/users', createUserRoutes({ userRepository, config }));
   app.use(errorHandler);
 
   return app;

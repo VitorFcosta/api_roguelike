@@ -7,8 +7,9 @@ const { validateObjectId } = require('../middlewares/validateObjectId');
 const { requireGatewayAuth, requireRole } = require('../middlewares/requireGatewayAuth');
 const { createCardSchema, updateCardSchema } = require('../validators/cardValidators');
 
-function createCardRoutes({ cardService }) {
+function createCardRoutes({ cardService, config }) {
   const router = express.Router();
+  const gatewayAuth = requireGatewayAuth(config);
 
   router.get(
     '/starter',
@@ -37,7 +38,7 @@ function createCardRoutes({ cardService }) {
 
   router.post(
     '/',
-    requireGatewayAuth,
+    gatewayAuth,
     requireRole('admin'),
     validate(createCardSchema),
     asyncHandler(async (req, res) => {
@@ -48,7 +49,7 @@ function createCardRoutes({ cardService }) {
 
   router.put(
     '/:id',
-    requireGatewayAuth,
+    gatewayAuth,
     requireRole('admin'),
     validateObjectId,
     validate(updateCardSchema),
@@ -60,7 +61,7 @@ function createCardRoutes({ cardService }) {
 
   router.delete(
     '/:id',
-    requireGatewayAuth,
+    gatewayAuth,
     requireRole('admin'),
     validateObjectId,
     asyncHandler(async (req, res) => {

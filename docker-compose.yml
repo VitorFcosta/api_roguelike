@@ -26,14 +26,15 @@ services:
       NODE_ENV: development
       AUTH_SERVICE_PORT: 3001
       MONGO_URI: mongodb://mongodb:27017/roguelike
-      JWT_SECRET: ${JWT_SECRET:-trocar_em_ambiente_real}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET obrigatorio. Copie .env.example para .env e altere o valor}
       JWT_ISSUER: ${JWT_ISSUER:-roguelike-api}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-roguelike-client}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1h}
       BCRYPT_SALT_ROUNDS: ${BCRYPT_SALT_ROUNDS:-10}
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:?INTERNAL_SERVICE_SECRET obrigatorio}
       ADMIN_SEED_NAME: ${ADMIN_SEED_NAME:-Admin}
       ADMIN_SEED_EMAIL: ${ADMIN_SEED_EMAIL:-admin@email.com}
-      ADMIN_SEED_PASSWORD: ${ADMIN_SEED_PASSWORD:-admin123456}
+      ADMIN_SEED_PASSWORD: ${ADMIN_SEED_PASSWORD:?ADMIN_SEED_PASSWORD obrigatorio}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3001/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
@@ -52,6 +53,7 @@ services:
       NODE_ENV: development
       CATALOG_SERVICE_PORT: 3002
       MONGO_URI: mongodb://mongodb:27017/roguelike
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:?INTERNAL_SERVICE_SECRET obrigatorio}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3002/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
@@ -76,6 +78,7 @@ services:
       MONGO_URI: mongodb://mongodb:27017/roguelike
       CATALOG_SERVICE_URL: http://catalog-service:3002
       RANKING_SERVICE_URL: http://ranking-service:3004
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:?INTERNAL_SERVICE_SECRET obrigatorio}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3003/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
@@ -94,6 +97,7 @@ services:
       NODE_ENV: development
       RANKING_SERVICE_PORT: 3004
       MONGO_URI: mongodb://mongodb:27017/roguelike
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:?INTERNAL_SERVICE_SECRET obrigatorio}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3004/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
@@ -115,7 +119,7 @@ services:
       ranking-service:
         condition: service_healthy
     ports:
-      - "3000:3000"
+      - "127.0.0.1:${API_GATEWAY_HOST_PORT:-3000}:3000"
     environment:
       NODE_ENV: development
       GATEWAY_PORT: 3000
@@ -123,9 +127,10 @@ services:
       CATALOG_SERVICE_URL: http://catalog-service:3002
       GAME_SERVICE_URL: http://game-service:3003
       RANKING_SERVICE_URL: http://ranking-service:3004
-      JWT_SECRET: ${JWT_SECRET:-trocar_em_ambiente_real}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET obrigatorio. Copie .env.example para .env e altere o valor}
       JWT_ISSUER: ${JWT_ISSUER:-roguelike-api}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-roguelike-client}
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:?INTERNAL_SERVICE_SECRET obrigatorio}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
       RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-60000}
       RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-100}
@@ -136,7 +141,7 @@ services:
     container_name: roguelike-prometheus
     restart: unless-stopped
     ports:
-      - "9090:9090"
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus-data:/prometheus
@@ -149,13 +154,13 @@ services:
     container_name: roguelike-grafana
     restart: unless-stopped
     ports:
-      - "3005:3000"
+      - "127.0.0.1:${GRAFANA_PORT:-3005}:3000"
     volumes:
       - grafana-data:/var/lib/grafana
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?GRAFANA_PASSWORD obrigatorio}
       GF_USERS_ALLOW_SIGN_UP: "false"
     depends_on:
       - prometheus

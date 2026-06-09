@@ -36,6 +36,7 @@ function loadConfig() {
     jwtSecret: required('JWT_SECRET'),
     jwtIssuer: process.env.JWT_ISSUER || 'roguelike-api',
     jwtAudience: process.env.JWT_AUDIENCE || 'roguelike-client',
+    internalServiceSecret: required('INTERNAL_SERVICE_SECRET'),
     corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:3000',
     rateLimitWindowMs: numberFromEnv('RATE_LIMIT_WINDOW_MS', 60000),
     rateLimitMax: numberFromEnv('RATE_LIMIT_MAX', 100),
