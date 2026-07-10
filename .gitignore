@@ -13,3 +13,5 @@ npm-debug.log*
 id_rsa
 id_dsa
 .npmrc
+.idea/
+.codebase-memory/

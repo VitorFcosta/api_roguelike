@@ -98,6 +98,12 @@ function makeStores() {
       if (!doc) return null;
       Object.assign(doc, data);
       return doc;
+    },
+    async updateIfActiveAtTurn(id, expectedTurn, data) {
+      const doc = battles.get(String(id));
+      if (!doc || doc.status !== 'active' || doc.turn !== expectedTurn) return null;
+      Object.assign(doc, data);
+      return doc;
     }
   };
 
@@ -115,6 +121,19 @@ function makeStores() {
       const doc = rewards.get(String(id));
       if (!doc) return null;
       Object.assign(doc, data);
+      return doc;
+    },
+    async claim(id, cardId) {
+      const doc = rewards.get(String(id));
+      const isOption = doc?.options.some((option) => String(option.cardId) === String(cardId));
+
+      if (!doc || doc.status !== 'pending' || !isOption) return null;
+
+      Object.assign(doc, {
+        status: 'chosen',
+        chosenCardId: cardId,
+        chosenAt: new Date()
+      });
       return doc;
     }
   };
@@ -233,6 +252,22 @@ describe('Usar carta de ataque', () => {
         expect.stringContaining('Inimigo atacou')
       ])
     );
+  });
+
+  test('aceita apenas uma ação concorrente para o mesmo turno', async () => {
+    const { service } = makeService();
+    const run = await service.createRun(USER_ID);
+    const battle = await service.createBattle(run._id, USER_ID);
+    const attackCard = run.deck.find(c => c.type === 'attack');
+
+    const results = await Promise.allSettled([
+      service.playCard(battle._id, attackCard.cardId, USER_ID),
+      service.playCard(battle._id, attackCard.cardId, USER_ID)
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')[0].reason)
+      .toMatchObject({ code: 'BATTLE_STATE_CHANGED' });
   });
 });
 
@@ -397,6 +432,28 @@ describe('Escolher recompensa', () => {
     const reward = await service.getRewards(run._id, USER_ID);
     await expect(service.chooseReward(reward._id, newId(), USER_ID))
       .rejects.toMatchObject({ code: 'INVALID_CARD_CHOICE' });
+  });
+
+  test('aceita apenas uma escolha concorrente da mesma recompensa', async () => {
+    const { service } = makeService();
+    const run = await service.createRun(USER_ID);
+    const battle = await service.createBattle(run._id, USER_ID);
+    const attackCard = run.deck.find(c => c.type === 'attack');
+    await service.playCard(battle._id, attackCard.cardId, USER_ID);
+    await service.playCard(battle._id, attackCard.cardId, USER_ID);
+    const reward = await service.getRewards(run._id, USER_ID);
+
+    const results = await Promise.allSettled([
+      service.chooseReward(reward._id, reward.options[0].cardId, USER_ID),
+      service.chooseReward(reward._id, reward.options[1].cardId, USER_ID)
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')[0].reason)
+      .toMatchObject({ code: 'REWARD_ALREADY_CHOSEN' });
+
+    const updatedRun = await service.getRunById(run._id, USER_ID);
+    expect(updatedRun.deck).toHaveLength(4);
   });
 });
 

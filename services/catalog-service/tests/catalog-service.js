@@ -243,7 +243,13 @@ describe('catalog-service', () => {
     cardRepository = createMemoryCardRepository();
     enemyRepository = createMemoryEnemyRepository();
     bossRepository = createMemoryBossRepository();
-    app = createApp({ cardRepository, enemyRepository, bossRepository, config: TEST_CONFIG });
+    app = createApp({
+      cardRepository,
+      enemyRepository,
+      bossRepository,
+      config: TEST_CONFIG,
+      isDatabaseReady: () => true
+    });
   });
 
   // ----------------------------------------------------------
@@ -740,5 +746,20 @@ describe('catalog-service', () => {
     expect(response.status).toBe(200);
     expect(response.body.data.service).toBe('catalog-service');
     expect(response.body.data.status).toBe('ok');
+  });
+
+  test('GET /health retorna 503 quando o banco não está pronto', async () => {
+    const unavailableApp = createApp({
+      cardRepository,
+      enemyRepository,
+      bossRepository,
+      config: TEST_CONFIG,
+      isDatabaseReady: () => false
+    });
+
+    const response = await request(unavailableApp).get('/health');
+
+    expect(response.status).toBe(503);
+    expect(response.body.error.code).toBe('DATABASE_NOT_READY');
   });
 });

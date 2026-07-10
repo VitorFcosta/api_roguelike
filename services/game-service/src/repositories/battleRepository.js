@@ -16,6 +16,14 @@ function createBattleRepository() {
 
     async update(id, data) {
       return Battle.findByIdAndUpdate(id, { $set: data }, { new: true, runValidators: true });
+    },
+
+    async updateIfActiveAtTurn(id, expectedTurn, data) {
+      return Battle.findOneAndUpdate(
+        { _id: id, status: 'active', turn: expectedTurn },
+        { $set: data },
+        { new: true, runValidators: true }
+      );
     }
   };
 }

@@ -16,6 +16,20 @@ function createRewardRepository() {
 
     async update(id, data) {
       return Reward.findByIdAndUpdate(id, { $set: data }, { new: true, runValidators: true });
+    },
+
+    async claim(id, cardId) {
+      return Reward.findOneAndUpdate(
+        { _id: id, status: 'pending', 'options.cardId': cardId },
+        {
+          $set: {
+            status: 'chosen',
+            chosenCardId: cardId,
+            chosenAt: new Date()
+          }
+        },
+        { new: true, runValidators: true }
+      );
     }
   };
 }

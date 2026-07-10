@@ -4,6 +4,10 @@ const PLAYER_MAX_HP = 80;
 const COMMON_BATTLE_COUNT = 5;
 const BOSS_FLOOR = COMMON_BATTLE_COUNT + 1; // 5 batalhas comuns, depois boss
 
+function isDuplicateKey(error) {
+  return error?.code === 11000;
+}
+
 function createGameService({
   runRepository,
   battleRepository,
@@ -11,7 +15,7 @@ function createGameService({
   catalogClient,
   rankingClient
 }) {
-  // ─── RUN ───────────────────────────────────────────────────────────────────
+  // RUN 
 
   async function createRun(userId) {
     // Impede múltiplas runs ativas simultaneamente
@@ -34,14 +38,22 @@ function createGameService({
       rarity: c.rarity
     }));
 
-    return runRepository.create({
-      userId,
-      status: 'active',
-      playerHp: PLAYER_MAX_HP,
-      playerMaxHp: PLAYER_MAX_HP,
-      floor: 1,
-      deck
-    });
+    try {
+      return await runRepository.create({
+        userId,
+        status: 'active',
+        playerHp: PLAYER_MAX_HP,
+        playerMaxHp: PLAYER_MAX_HP,
+        floor: 1,
+        deck
+      });
+    } catch (error) {
+      if (isDuplicateKey(error)) {
+        throw new AppError(409, 'RUN_ALREADY_ACTIVE', 'Você já possui uma run ativa.');
+      }
+
+      throw error;
+    }
   }
 
   async function listRuns(userId, options = {}) {
@@ -80,7 +92,7 @@ function createGameService({
     return updated;
   }
 
-  // ─── BATTLE ────────────────────────────────────────────────────────────────
+  // BATTLE 
 
   async function createBattle(runId, userId) {
     const run = await getRunById(runId, userId);
@@ -124,23 +136,31 @@ function createGameService({
       battleType = 'common';
     }
 
-    return battleRepository.create({
-      runId,
-      type: battleType,
-      status: 'active',
-      enemyId: enemy._id,
-      enemyName: enemy.name,
-      enemyMaxHp: enemy.maxHp,
-      enemyCurrentHp: enemy.maxHp,
-      enemyAttack: enemy.attack,
-      enemyDefense: enemy.defense || 0,
-      enemySpecialAttack: enemy.specialAttack || 0,
-      playerHpAtStart: run.playerHp,
-      playerCurrentHp: run.playerHp,
-      playerBlock: 0,
-      turn: 1,
-      log: [`Batalha contra ${enemy.name} iniciada.`]
-    });
+    try {
+      return await battleRepository.create({
+        runId,
+        type: battleType,
+        status: 'active',
+        enemyId: enemy._id,
+        enemyName: enemy.name,
+        enemyMaxHp: enemy.maxHp,
+        enemyCurrentHp: enemy.maxHp,
+        enemyAttack: enemy.attack,
+        enemyDefense: enemy.defense || 0,
+        enemySpecialAttack: enemy.specialAttack || 0,
+        playerHpAtStart: run.playerHp,
+        playerCurrentHp: run.playerHp,
+        playerBlock: 0,
+        turn: 1,
+        log: [`Batalha contra ${enemy.name} iniciada.`]
+      });
+    } catch (error) {
+      if (isDuplicateKey(error)) {
+        throw new AppError(409, 'BATTLE_ALREADY_ACTIVE', 'Já existe uma batalha ativa nesta run.');
+      }
+
+      throw error;
+    }
   }
 
   async function getBattleById(battleId, userId) {
@@ -158,7 +178,7 @@ function createGameService({
     return battle;
   }
 
-  // ─── PLAY CARD ─────────────────────────────────────────────────────────────
+  // PLAY CARD
 
   async function playCard(battleId, cardId, userId) {
     const battle = await battleRepository.findById(battleId);
@@ -168,6 +188,8 @@ function createGameService({
     if (battle.status !== 'active') {
       throw new AppError(400, 'BATTLE_NOT_ACTIVE', 'A batalha não está ativa.');
     }
+
+    const expectedTurn = battle.turn;
 
     const run = await runRepository.findById(battle.runId);
     if (!run) {
@@ -248,15 +270,27 @@ function createGameService({
     }
 
     // Atualiza batalha
-    const updatedBattle = await battleRepository.update(battleId, {
-      playerCurrentHp,
-      playerBlock: Math.max(0, playerBlock),
-      enemyCurrentHp,
-      turn: nextTurn,
-      status: battleStatus,
-      log,
-      finishedAt: battleFinishedAt
-    });
+    const updatedBattle = await battleRepository.updateIfActiveAtTurn(
+      battleId,
+      expectedTurn,
+      {
+        playerCurrentHp,
+        playerBlock: Math.max(0, playerBlock),
+        enemyCurrentHp,
+        turn: nextTurn,
+        status: battleStatus,
+        log,
+        finishedAt: battleFinishedAt
+      }
+    );
+
+    if (!updatedBattle) {
+      throw new AppError(
+        409,
+        'BATTLE_STATE_CHANGED',
+        'A batalha foi alterada por outra ação. Atualize o estado e tente novamente.'
+      );
+    }
 
     // Atualiza HP do jogador na run
     await runRepository.update(run._id, { playerHp: playerCurrentHp });
@@ -365,15 +399,23 @@ function createGameService({
       throw new AppError(400, 'INVALID_CARD_CHOICE', 'Carta inválida para esta recompensa.');
     }
 
-    // Adiciona carta ao deck da run
-    await runRepository.addCardToDeck(reward.runId, chosen);
+    const claimedReward = await rewardRepository.claim(rewardId, chosen.cardId);
 
-    // Marca recompensa como escolhida
-    return rewardRepository.update(rewardId, {
-      status: 'chosen',
-      chosenCardId: chosen.cardId,
-      chosenAt: new Date()
-    });
+    if (!claimedReward) {
+      throw new AppError(
+        409,
+        'REWARD_ALREADY_CHOSEN',
+        'Esta recompensa já foi escolhida por outra ação.'
+      );
+    }
+
+    const updatedRun = await runRepository.addCardToDeck(claimedReward.runId, chosen);
+
+    if (!updatedRun) {
+      throw new AppError(500, 'RUN_UPDATE_FAILED', 'Não foi possível adicionar a carta ao deck.');
+    }
+
+    return claimedReward;
   }
 
   return {

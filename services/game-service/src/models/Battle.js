@@ -88,6 +88,15 @@ const battleSchema = new mongoose.Schema(
   }
 );
 
+battleSchema.index(
+  { runId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: 'active' },
+    name: 'unique_active_battle_per_run'
+  }
+);
+
 const Battle = mongoose.model('Battle', battleSchema);
 
 module.exports = { Battle };

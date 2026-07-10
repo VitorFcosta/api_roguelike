@@ -8,7 +8,7 @@ function getServiceName(baseUrl) {
   }
 }
 
-async function forwardHttpRequest({ baseUrl, path, method, headers, body }) {
+async function forwardHttpRequest({ baseUrl, path, method, headers, body, timeoutMs = 5000 }) {
   const url = new URL(path, baseUrl);
   const options = {
     method,
@@ -24,13 +24,23 @@ async function forwardHttpRequest({ baseUrl, path, method, headers, body }) {
   }
 
   let response;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    response = await fetch(url, options);
+    response = await fetch(url, { ...options, signal: controller.signal });
   } catch (_error) {
     const serviceName = getServiceName(baseUrl);
+
+    if (controller.signal.aborted) {
+      const code = `${serviceName.replace(/-/g, '_').toUpperCase()}_TIMEOUT`;
+      throw new AppError(504, code, `${serviceName} demorou demais para responder.`);
+    }
+
     const code = `${serviceName.replace(/-/g, '_').toUpperCase()}_UNAVAILABLE`;
     throw new AppError(503, code, `${serviceName} indisponível.`);
+  } finally {
+    clearTimeout(timeoutId);
   }
 
   const contentType = response.headers.get('content-type') || '';

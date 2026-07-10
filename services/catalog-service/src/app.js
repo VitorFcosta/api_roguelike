@@ -1,5 +1,6 @@
 const express = require('express');
 const helmet = require('helmet');
+const mongoose = require('mongoose');
 
 const { loadConfig } = require('./config/env');
 const { createCardRepository } = require('./repositories/cardRepository');
@@ -12,11 +13,12 @@ const { createCardRoutes } = require('./routes/cardRoutes');
 const { createEnemyRoutes } = require('./routes/enemyRoutes');
 const { createBossRoutes } = require('./routes/bossRoutes');
 const { errorHandler } = require('./middlewares/errorHandler');
-const { sendSuccess } = require('./utils/responses');
+const { sendSuccess, sendError } = require('./utils/responses');
 const { createMetrics } = require('./utils/metrics');
 
 function createApp(options = {}) {
   const config = options.config || loadConfig();
+  const isDatabaseReady = options.isDatabaseReady || (() => mongoose.connection.readyState === 1);
 
   const cardRepository = options.cardRepository || createCardRepository();
   const enemyRepository = options.enemyRepository || createEnemyRepository();
@@ -34,7 +36,19 @@ function createApp(options = {}) {
   app.use(express.json({ limit: '100kb' }));
   app.use(metricsMiddleware);
 
+  app.get('/live', (_req, res) => {
+    return sendSuccess(res, 200, {
+      service: 'catalog-service',
+      status: 'ok',
+      timestamp: new Date().toISOString()
+    });
+  });
+
   app.get('/health', (_req, res) => {
+    if (!isDatabaseReady()) {
+      return sendError(res, 503, 'DATABASE_NOT_READY', 'Banco de dados indisponível.');
+    }
+
     return sendSuccess(res, 200, {
       service: 'catalog-service',
       status: 'ok',

@@ -58,6 +58,14 @@ const runSchema = new mongoose.Schema(
 );
 
 runSchema.index({ userId: 1, status: 1 });
+runSchema.index(
+  { userId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: 'active' },
+    name: 'unique_active_run_per_user'
+  }
+);
 
 const Run = mongoose.model('Run', runSchema);
 

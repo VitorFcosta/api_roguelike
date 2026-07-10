@@ -40,6 +40,7 @@ function loadConfig() {
     corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:3000',
     rateLimitWindowMs: numberFromEnv('RATE_LIMIT_WINDOW_MS', 60000),
     rateLimitMax: numberFromEnv('RATE_LIMIT_MAX', 100),
+    upstreamTimeoutMs: numberFromEnv('UPSTREAM_TIMEOUT_MS', 5000),
     rateLimitEnabled: process.env.RATE_LIMIT_ENABLED !== 'false'
   };
 }

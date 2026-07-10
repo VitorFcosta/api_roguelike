@@ -25,7 +25,8 @@ function createForwardHandler({ baseUrl, forwarder, config }) {
         method: req.method,
         headers: buildForwardHeaders(req, config),
         body: req.body,
-        requestId: req.requestId
+        requestId: req.requestId,
+        timeoutMs: config.upstreamTimeoutMs
       });
 
       if (result.headers && result.headers['content-type']) {

@@ -50,6 +50,15 @@ const rewardSchema = new mongoose.Schema(
   }
 );
 
+rewardSchema.index(
+  { runId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: 'pending' },
+    name: 'unique_pending_reward_per_run'
+  }
+);
+
 const Reward = mongoose.model('Reward', rewardSchema);
 
 module.exports = { Reward };

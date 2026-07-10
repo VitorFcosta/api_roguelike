@@ -17,6 +17,7 @@ function createTestConfig() {
     corsOrigin: 'http://localhost:3000',
     rateLimitWindowMs: 60000,
     rateLimitMax: 100,
+    upstreamTimeoutMs: 5000,
     rateLimitEnabled: false
   };
 }
@@ -94,7 +95,8 @@ describe('api-gateway', () => {
         'x-user-id': 'user-1',
         'x-user-role': 'user',
         'x-internal-service-secret': config.internalServiceSecret
-      })
+      }),
+      timeoutMs: config.upstreamTimeoutMs
     }));
   });
 
