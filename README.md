@@ -1,191 +1,123 @@
 # API Roguelike de Cartas
 
-Backend REST para um jogo de cartas roguelike simplificado, inspirado em jogos como Slay the Spire. O jogador cria uma run, enfrenta batalhas, escolhe recompensas, vence ou perde a tentativa e tem o resultado refletido no ranking.
+Backend REST de um roguelike de cartas inspirado em jogos como Slay the
+Spire. O jogador cria uma run, enfrenta cinco batalhas comuns, escolhe
+recompensas, luta contra um boss e tem o resultado refletido no ranking.
 
-Este projeto foi criado como estudo prático de arquitetura em microserviços com Node.js, Docker, MongoDB, autenticação JWT, observabilidade com Prometheus/Grafana e testes automatizados.
+O projeto é um estudo prático de microserviços com Node.js, Express, MongoDB,
+Docker Compose, JWT, Prometheus, Grafana e testes automatizados.
 
-## Sumário
+## O que o projeto demonstra
 
-- [Visão geral](#visão-geral)
-- [Funcionalidades](#funcionalidades)
-- [Arquitetura](#arquitetura)
-- [Modelagem dos dados](#modelagem-dos-dados)
-- [Stack](#stack)
-- [Pré-requisitos](#pré-requisitos)
-- [Configuração](#configuração)
-- [Como executar](#como-executar)
-- [URLs do ambiente local](#urls-do-ambiente-local)
-- [Fluxo principal](#fluxo-principal)
-- [Documentação da API](#documentação-da-api)
-- [Testes](#testes)
-- [Observabilidade](#observabilidade)
-- [Segurança](#segurança)
-- [Estrutura do projeto](#estrutura-do-projeto)
-- [Comandos úteis](#comandos-úteis)
-- [Documentos técnicos](#documentos-técnicos)
-- [Licença](#licença)
-
-## Visão geral
-
-A API é organizada em microserviços. O cliente nunca chama os serviços diretamente; toda requisição pública entra pelo `api-gateway`, que valida autenticação, aplica rate limit e encaminha a chamada para o serviço correto.
-
-O jogo tem uma regra central: cada usuário pode ter uma run ativa por vez. Durante a run, ele enfrenta 5 batalhas comuns, escolhe recompensas entre batalhas e depois enfrenta o boss no `floor` 6. Ao vencer, perder ou abandonar, o resultado alimenta o ranking.
-
-## Funcionalidades
-
-- Cadastro e login de usuários.
-- Autenticação com JWT.
-- Controle de acesso por perfil `user` e `admin`.
-- CRUD administrativo de cartas, inimigos e bosses.
-- Soft delete no catálogo.
-- Criação e consulta de runs.
-- Criação de batalhas.
-- Ação de jogar carta em batalha.
-- Escolha de recompensa.
-- Ranking global e estatísticas do usuário.
-- Atualizações atômicas de batalha, run, recompensa e outbox.
-- Entrega assíncrona do resultado ao ranking com retry e dead-letter.
-- Ranking idempotente por `runId`.
-- Swagger para testar a API.
-- Métricas Prometheus e dashboard Grafana.
-- Testes unitários/integrados com Jest e Supertest.
-- Testes de carga com k6.
+- API pública centralizada em um gateway.
+- Autenticação JWT e autorização por perfis `user` e `admin`.
+- Catálogo administrativo de cartas, inimigos e bosses.
+- Runs, batalhas, deck, HP, recompensas e boss no `floor` 6.
+- Transações MongoDB para impedir atualizações parciais do jogo.
+- Outbox persistente para entregar runs finalizadas ao ranking.
+- Worker com retry, backoff, lock e dead-letter.
+- Ranking idempotente: um `runId` altera os totais uma única vez.
+- Métricas Prometheus, dashboard Grafana e testes de carga com k6.
 
 ## Arquitetura
 
-A visão geral abaixo mostra o papel do gateway, dos microserviços, do MongoDB e da observabilidade.
+![Fluxo lógico do jogo, outbox e ranking](docs/diagrams/architecture-logical.svg)
 
-![Arquitetura lógica da API Roguelike de Cartas](docs/diagrams/architecture-logical.svg)
+O fluxo público é síncrono: cliente → gateway → serviço. A atualização do
+ranking é assíncrona:
 
-| Serviço | Responsabilidade |
-|---|---|
-| `api-gateway` | Entrada pública da API, JWT, CORS, rate limit, Swagger e proxy |
-| `auth-service` | Cadastro, login, usuários e seed do admin |
-| `catalog-service` | Catálogo de cartas, inimigos e bosses |
-| `game-service` | Runs, batalhas, recompensas e regras do jogo |
-| `game-outbox-worker` | Publica resultados de runs no ranking com retry |
-| `ranking-service` | Ranking global e estatísticas do jogador |
-| `mongodb` | Persistência dos dados |
-| `prometheus` | Coleta de métricas |
-| `grafana` | Visualização das métricas |
+1. O `game-service` finaliza a run e cria um `OutboxEvent` na mesma transação.
+2. O `game-outbox-worker` busca o evento no MongoDB.
+3. O worker chama o `ranking-service`.
+4. O ranking registra `ProcessedRun` e atualiza `Ranking` na mesma transação.
+5. Uma reentrega do mesmo `runId` retorna sucesso sem incrementar novamente.
 
-Fluxo resumido:
+O worker usa a mesma imagem do `game-service`, mas roda em outro container e
+outro processo. Assim, indisponibilidade do ranking não bloqueia a requisição
+do jogador.
 
-```text
-Cliente/k6/Swagger
-  -> api-gateway
-    -> auth-service
-    -> catalog-service
-    -> game-service
-      -> catalog-service
-    -> ranking-service
-game-service -> MongoDB (run, batalha, recompensa e outbox na mesma transacao)
-game-outbox-worker -> MongoDB (claim da outbox) -> ranking-service
-Prometheus -> /metrics dos serviços
-Grafana -> Prometheus
+Detalhes e diagrama de deploy: [docs/architecture.md](docs/architecture.md).
+
+## Início rápido — instalação nova
+
+### Pré-requisitos
+
+- Docker Desktop com Docker Compose v2.
+- Node.js e npm para instalar dependências e executar scripts locais.
+- k6 apenas para os testes de carga opcionais.
+
+### 1. Instale as dependências
+
+```bash
+npm install
 ```
 
-Veja mais detalhes em [docs/architecture.md](docs/architecture.md).
-
-## Modelagem dos dados
-
-O projeto usa MongoDB com Mongoose. A modelagem mistura dois conceitos:
-
-- **Referência**: um documento aponta para outro, como `Battle.runId`.
-- **Snapshot**: o jogo copia dados importantes para preservar o estado histórico, como cartas dentro do deck da run e dados do inimigo dentro da batalha.
-
-Isso é importante porque o catálogo pode mudar depois. Se o admin editar uma carta, uma run antiga continua mostrando a carta como ela era naquele momento.
-
-| Coleção | Serviço | Papel |
-|---|---|---|
-| `users` | `auth-service` | Usuários, email, senha hasheada e perfil |
-| `cards` | `catalog-service` | Cartas do catálogo |
-| `enemies` | `catalog-service` | Inimigos comuns |
-| `bosses` | `catalog-service` | Bosses |
-| `runs` | `game-service` | Tentativas do jogador, HP, floor, deck e status |
-| `battles` | `game-service` | Estado da batalha e log de ações |
-| `rewards` | `game-service` | Opções de recompensa e carta escolhida |
-| `outboxevents` | `game-service` | Eventos pendentes, publicados ou em dead-letter |
-| `rankings` | `ranking-service` | Estatísticas agregadas por usuário |
-| `processedruns` | `ranking-service` | Controle idempotente dos `runId` já aplicados |
-
-O diagrama ER completo e exemplos de documentos ficam em [docs/mongodb-modeling.md](docs/mongodb-modeling.md).
-
-## Stack
-
-- Node.js
-- Express
-- MongoDB
-- Mongoose
-- Docker Compose
-- JWT
-- bcrypt
-- Zod
-- Helmet
-- Prometheus
-- Grafana
-- Jest
-- Supertest
-- k6
-
-## Pré-requisitos
-
-- Docker Desktop instalado e rodando.
-- Node.js e npm instalados para usar scripts locais.
-- k6 instalado apenas se você quiser rodar testes de carga.
-
-## Configuração
-
-Crie o `.env` local a partir do exemplo:
+### 2. Crie o arquivo de ambiente
 
 ```bash
 cp .env.example .env
 ```
 
-Depois edite o `.env`. Os valores abaixo precisam ser trocados antes de subir o ambiente:
+Troque, no mínimo, estes valores do `.env`:
 
-| Variável | Para que serve |
-|---|---|
-| `JWT_SECRET` | Segredo usado para assinar tokens JWT |
-| `INTERNAL_SERVICE_SECRET` | Segredo usado entre gateway e microserviços |
-| `ADMIN_SEED_PASSWORD` | Senha do usuário admin criado pelo seed |
-| `GRAFANA_PASSWORD` | Senha do usuário do Grafana |
+| Variável | Uso |
+| --- | --- |
+| `JWT_SECRET` | Assinatura dos tokens JWT. |
+| `INTERNAL_SERVICE_SECRET` | Autenticação entre gateway, serviços e worker. |
+| `ADMIN_SEED_PASSWORD` | Senha do administrador criado pelo seed. |
+| `GRAFANA_PASSWORD` | Senha do Grafana. |
 
-As portas públicas também ficam no `.env`:
-
-| Variável | Padrão | Serviço |
-|---|---:|---|
-| `API_GATEWAY_HOST_PORT` | `3000` | API Gateway e Swagger |
-| `PROMETHEUS_PORT` | `9090` | Prometheus |
-| `GRAFANA_PORT` | `3005` | Grafana |
-
-Para gerar segredos fortes:
+Você pode gerar segredos com:
 
 ```bash
 openssl rand -base64 32
 ```
 
-Use um valor diferente para `JWT_SECRET` e `INTERNAL_SERVICE_SECRET`.
+Use valores diferentes para `JWT_SECRET` e `INTERNAL_SERVICE_SECRET`.
 
-## Como executar
-
-Suba todos os containers:
+### 3. Suba os serviços principais
 
 ```bash
 npm run up
 ```
 
-Esse comando executa `docker compose up --build -d` e imprime as portas principais no terminal. Na primeira migração para a outbox, o worker fica propositalmente desligado até o reset controlado do ranking.
+Esse comando executa `docker compose up --build -d` e mostra as URLs públicas.
+Ele não inicia o worker na primeira instalação porque o worker pertence ao
+profile `outbox`.
 
-Em um ambiente novo, sem ranking anterior para migrar, ative o worker depois que os servicos base estiverem saudaveis:
+### 4. Execute os seeds
+
+```bash
+docker compose exec auth-service npm run seed:admin
+docker compose exec catalog-service npm run seed:catalog
+```
+
+### 5. Ative o worker
+
+Em uma instalação nova, o ranking está vazio e não precisa de reset:
 
 ```bash
 docker compose --profile outbox up -d game-outbox-worker
 ```
 
-### Primeiro rollout da outbox
+Pronto. O jogo e a entrega assíncrona do ranking estão ativos.
 
-Execute esta sequência uma única vez no ambiente que já possuía dados de ranking:
+### 6. Verifique o ambiente
+
+```bash
+docker compose --profile outbox ps
+docker compose exec mongodb mongosh --quiet --eval "rs.status().ok"
+```
+
+O Mongo deve retornar `1`. O container `mongo-init-replica` deve aparecer como
+`Exited (0)`; isso significa que a inicialização one-shot terminou com sucesso.
+
+## Migração de um ambiente que já possuía ranking
+
+Esta seção é apenas para o primeiro rollout da outbox em um banco que já tinha
+dados de ranking.
+
+Execute na ordem:
 
 ```bash
 npm run up
@@ -193,111 +125,90 @@ docker compose exec -e CONFIRM_RANKING_RESET=true ranking-service npm run reset:
 docker compose --profile outbox up -d game-outbox-worker
 ```
 
-O reset apaga somente `rankings` e `processedruns`. Ele nunca roda automaticamente e falha se `CONFIRM_RANKING_RESET` não for exatamente `true`. Depois desse primeiro rollout, suba o ambiente com o profile do worker:
+Não repita o reset depois que o worker estiver em uso, a menos que você
+realmente queira apagar o ranking atual.
+
+Nas próximas inicializações, suba o ambiente completo com:
 
 ```bash
 docker compose --profile outbox up --build -d
+npm run ports
 ```
- |
 
-Se você já subiu o ambiente e quer apenas rever as portas:
+
+## Primeiro fluxo pela API
+
+Use o Swagger em `http://localhost:3000/docs` ou faça as chamadas diretamente:
+
+1. `POST /v1/auth/register` — cadastra o jogador.
+2. `POST /v1/auth/login` — retorna o JWT.
+3. `POST /v1/runs` — cria a run e o deck inicial.
+4. `POST /v1/runs/{id}/battles` — cria uma batalha.
+5. `POST /v1/battles/{id}/actions/play-card` — joga uma carta.
+6. `GET /v1/runs/{id}/rewards` — consulta a recompensa pendente.
+7. `POST /v1/rewards/{id}/choose` — adiciona uma carta ao deck.
+8. Depois de cinco vitórias comuns, a batalha seguinte é o boss.
+9. `GET /v1/ranking` — consulta o ranking global.
+
+Rotas protegidas exigem `Authorization: Bearer <token>`. A referência completa
+está em [docs/api-endpoints.md](docs/api-endpoints.md).
+
+## Serviços e portas
+
+| Componente | Papel | Acesso |
+| --- | --- | --- |
+| `api-gateway` | Entrada pública. | `localhost:3000` |
+| `auth-service` | Usuários e JWT. | Docker `3001` |
+| `catalog-service` | Catálogo do jogo. | Docker `3002` |
+| `game-service` | Regras e outbox. | Docker `3003` |
+| `ranking-service` | Ranking idempotente. | Docker `3004` |
+| `game-outbox-worker` | Entrega de eventos. | Docker `3005` |
+| `mongodb` | Replica Set `rs0`. | Docker `27017` |
+| `prometheus` | Métricas. | `localhost:9090` |
+| `grafana` | Dashboards. | `localhost:3005` |
+
+As portas públicas podem ser alteradas em `.env`. Consulte os valores efetivos
+com:
 
 ```bash
 npm run ports
 ```
 
-Aguarde os serviços ficarem saudáveis:
+## Configuração da outbox
 
-```bash
-docker compose ps
-```
-
-Execute os seeds:
-
-```bash
-docker compose exec auth-service npm run seed:admin
-docker compose exec catalog-service npm run seed:catalog
-```
-
-## URLs do ambiente local
-
-Com os valores padrão do `.env.example`:
-
-| Recurso | URL |
-|---|---|
-| API Gateway | `http://localhost:3000` |
-| Swagger | `http://localhost:3000/docs` |
-| Prometheus | `http://localhost:9090` |
-| Grafana | `http://localhost:3005` |
-
-Se você mudar as portas no `.env`, rode:
-
-```bash
-npm run ports
-```
-
-## Fluxo principal
-
-1. `POST /v1/auth/register` cadastra usuário.
-2. `POST /v1/auth/login` retorna o JWT.
-3. `POST /v1/runs` cria uma run.
-4. `POST /v1/runs/:id/battles` cria uma batalha.
-5. `POST /v1/battles/:id/actions/play-card` joga uma carta.
-6. `POST /v1/rewards/:id/choose` escolhe uma recompensa.
-7. Depois de 5 vitórias comuns, o próximo combate é o boss.
-8. Ao finalizar a run, um evento é salvo na mesma transação do jogo.
-9. O worker entrega o evento ao ranking; reentregas do mesmo `runId` não duplicam totais.
-10. `GET /v1/ranking` consulta o ranking global.
-
-## Documentação da API
-
-Acesse o Swagger:
-
-```text
-http://localhost:${API_GATEWAY_HOST_PORT}/docs
-```
-
-Com a porta padrão:
-
-```text
-http://localhost:3000/docs
-```
-
-Para testar rotas protegidas:
-
-1. Execute `POST /auth/login`.
-2. Copie o token retornado.
-3. Clique em `Authorize` no Swagger.
-4. Cole o token no formato `Bearer <token>`.
-
-Resumo dos grupos de endpoints:
-
-| Grupo | Rotas |
-|---|---|
-| Auth | `/auth/register`, `/auth/login`, `/users/me`, `/users` |
-| Catálogo | `/cards`, `/enemies`, `/bosses` |
-| Jogo | `/runs`, `/battles`, `/rewards` |
-| Ranking | `/ranking`, `/ranking/me` |
-| Infra | `/health`, `/metrics` |
-
-Veja a lista completa em [docs/api-endpoints.md](docs/api-endpoints.md).
+| Variável | Padrão | Função |
+| --- | ---: | --- |
+| `OUTBOX_POLL_INTERVAL_MS` | `1000` | Intervalo entre ciclos do worker. |
+| `OUTBOX_BATCH_SIZE` | `20` | Máximo de eventos sequenciais por ciclo. |
+| `OUTBOX_MAX_ATTEMPTS` | `10` | Tentativas antes de `dead_letter`. |
+| `OUTBOX_BASE_DELAY_MS` | `1000` | Primeiro atraso do backoff. |
+| `OUTBOX_MAX_DELAY_MS` | `60000` | Teto do backoff. |
+| `OUTBOX_LOCK_TIMEOUT_MS` | `30000` | Recuperação de lock. |
+| `OUTBOX_HTTP_TIMEOUT_MS` | `5000` | Timeout da chamada ao ranking. |
+| `OUTBOX_METRICS_PORT` | `3005` | Health e métricas. |
 
 ## Testes
 
-Rodar todos os testes automatizados:
+Instale as dependências e execute:
 
 ```bash
 npm test
 ```
 
-Rodar apenas alguns workspaces:
+A suíte atual possui 116 testes. Ela inclui testes unitários, rotas com
+Supertest e transações reais usando `MongoMemoryReplSet`.
+
+Por workspace:
 
 ```bash
-npm run test:auth
-npm run test:gateway
+npm test --workspace=services/api-gateway
+npm test --workspace=services/auth-service
+npm test --workspace=services/catalog-service
+npm test --workspace=services/game-service
+npm test --workspace=services/ranking-service
 ```
 
-Testes de carga com k6:
+Testes de carga opcionais:
 
 ```bash
 k6 run tests/load/k6/main.js
@@ -306,53 +217,43 @@ k6 run tests/load/k6/stress.js
 k6 run tests/load/k6/populate.js
 ```
 
-Os scripts de k6 usam `http://localhost:3000/v1` por padrão.
-
 ## Observabilidade
 
-Todos os serviços expõem:
+- Gateway e serviços expõem `/health` e `/metrics`.
+- Os serviços internos também expõem `/live`.
+- O worker expõe `/live`, `/health` e `/metrics` apenas na rede Docker.
+- Prometheus coleta métricas a cada 15 segundos.
+- Grafana usa o Prometheus como datasource provisionado.
+- Métricas da outbox não usam `userId` nem `runId` como labels.
 
-- `/health`
-- `/metrics`
+Exemplo de consulta no Prometheus:
 
-Prometheus coleta métricas dos serviços a cada 15 segundos. Grafana usa o Prometheus como datasource e já possui dashboard provisionado.
-
-O worker expõe apenas dentro da rede Docker:
-
-- `/live`: processo em execução;
-- `/health`: Mongo conectado e loop ativo;
-- `/metrics`: publicados, falhas, dead-letters, pendentes e duração.
-
-As métricas não usam `userId` nem `runId` como labels, evitando cardinalidade crescente no Prometheus.
-
-Query útil no Prometheus:
-
-```text
+```promql
 rate(api_gateway_http_requests_total[1m])
 ```
 
-## Segurança
+Logs úteis:
 
-Cuidados implementados:
+```bash
+docker compose logs -f api-gateway
+docker compose --profile outbox logs -f game-outbox-worker
+```
 
-- JWT com `issuer`, `audience` e algoritmo HS256.
-- Senhas armazenadas com bcrypt.
-- Senha de cadastro entre 12 e 72 caracteres.
-- Rate limit no gateway.
-- `helmet` nos apps Express.
-- Remoção do header `x-powered-by`.
-- Limite de JSON em `100kb`.
-- Autorização por perfil.
-- Comunicação interna protegida por `INTERNAL_SERVICE_SECRET`.
-- Serviços internos não são publicados diretamente no host.
-- Portas públicas do Compose ficam presas em `127.0.0.1`.
+## Segurança e limites
 
-Cuidados que você deve manter:
+- Senhas são armazenadas com bcrypt.
+- JWT valida algoritmo, `issuer` e `audience`.
+- Serviços internos exigem `INTERNAL_SERVICE_SECRET`.
+- Apps Express usam Helmet, removem `x-powered-by` e limitam JSON a `100kb`.
+- Serviços internos não publicam portas no host.
+- As portas públicas do Compose são vinculadas a `127.0.0.1`.
+- O Replica Set local possui um único nó: permite transações, mas não oferece
+  alta disponibilidade.
+- Produção deve usar MongoDB gerenciado ou um Replica Set com vários membros.
 
-- Não commitar `.env`.
-- Não reutilizar `JWT_SECRET` e `INTERNAL_SERVICE_SECRET`.
-- Não usar senhas de exemplo em produção.
-- Não expor Grafana e Prometheus publicamente sem proteção extra.
+Nunca versione `.env`, reutilize os segredos de exemplo ou execute
+`docker compose down -v` sem intenção: a opção `-v` apaga os volumes, incluindo
+o banco.
 
 ## Estrutura do projeto
 
@@ -363,68 +264,59 @@ Cuidados que você deve manter:
 │   ├── auth-service/
 │   ├── catalog-service/
 │   ├── game-service/
+│   │   └── src/workers/outboxWorker.js
 │   └── ranking-service/
-├── monitoring/
-│   ├── prometheus/
-│   └── grafana/
-├── tests/
-│   └── load/k6/
-├── docs/
-├── scripts/
-│   └── showPorts.js
+├── infra/mongo/                 # inicialização do Replica Set
+├── monitoring/                  # Prometheus e Grafana
+├── tests/load/k6/               # testes de carga
+├── docs/                        # documentação técnica
 ├── docker-compose.yml
-├── package.json
 ├── .env.example
 └── README.md
 ```
 
 ## Comandos úteis
 
-| Comando | Uso |
-|---|---|
-| `npm run up` | Sobe containers e mostra portas |
-| `npm run ports` | Mostra URLs e portas configuradas |
-| `npm test` | Roda testes dos workspaces |
-| `npm run reset:ranking` | Apaga ranking e runs processadas; exige `CONFIRM_RANKING_RESET=true` |
-| `npm run outbox:retry -- --event-id <id>` | Reenvia um dead-letter específico |
-| `npm run outbox:retry -- --all` | Reenvia todos os dead-letters |
-| `docker compose ps` | Mostra status dos containers |
-| `docker compose logs -f` | Mostra logs em tempo real |
-| `docker compose logs -f api-gateway` | Mostra logs do gateway |
-| `docker compose down` | Para o ambiente |
-| `docker compose down -v` | Para e apaga volumes |
-
-No ambiente Docker, execute a recuperação dentro do worker:
+Serviços principais, sem ativar um worker novo:
 
 ```bash
-docker compose --profile outbox exec game-outbox-worker npm run outbox:retry -- --event-id <id>
-docker compose --profile outbox exec game-outbox-worker npm run outbox:retry -- --all
+npm run up
 ```
 
-## Consistência e limitações do Mongo local
-
-O MongoDB local roda como Replica Set `rs0` de um único nó para permitir transações entre documentos. O inicializador `mongo-init-replica` é idempotente e os serviços só iniciam depois que o nó aceita escrita como primário.
-
-Confira o estado com:
+Ambiente completo, incluindo o worker:
 
 ```bash
-docker compose exec mongodb mongosh --quiet --eval "rs.status().ok"
+docker compose --profile outbox up --build -d
 ```
 
-O resultado esperado é `1`. Esse Replica Set de um nó serve apenas para desenvolvimento: ele não oferece alta disponibilidade. Em produção, use MongoDB gerenciado ou um Replica Set com pelo menos três membros.
+Estado, portas e testes:
 
-O worker tenta publicar até 10 vezes. Falhas de rede, timeout, HTTP `408`, `429` e `5xx` usam backoff exponencial limitado a 60 segundos. Outros `4xx` vão diretamente para `dead_letter`. O lock expira em 30 segundos, permitindo que outro ciclo recupere um evento preso após queda do processo.
+```bash
+docker compose --profile outbox ps
+npm run ports
+npm test
+```
 
-## Documentos técnicos
+Parar sem apagar os dados:
+
+```bash
+docker compose --profile outbox down
+```
+
+Apagar também os volumes — incluindo o MongoDB:
+
+```bash
+docker compose --profile outbox down -v
+```
+
+## Documentação técnica
 
 | Documento | Conteúdo |
-|---|---|
-| [docs/requirements.md](docs/requirements.md) | Requisitos e regras de negócio |
-| [docs/sdd.md](docs/sdd.md) | Desenho técnico dos serviços |
-| [docs/mongodb-modeling.md](docs/mongodb-modeling.md) | Modelagem MongoDB |
-| [docs/api-endpoints.md](docs/api-endpoints.md) | Rotas públicas e internas |
-| [docs/architecture.md](docs/architecture.md) | Arquitetura e diagramas |
+| --- | --- |
+| [Arquitetura](docs/architecture.md) | Fluxo síncrono, outbox, worker e deploy. |
+| [Requisitos](docs/requirements.md) | Regras de negócio e consistência. |
+| [Modelagem MongoDB](docs/mongodb-modeling.md) | Coleções e transações. |
+| [Endpoints](docs/api-endpoints.md) | Rotas públicas e internas. |
+| [SDD](docs/sdd.md) | Decisões de desenho dos serviços. |
 
-## Licença
 
-Licença ainda não definida neste repositório.
