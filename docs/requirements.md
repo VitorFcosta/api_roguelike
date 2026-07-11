@@ -23,6 +23,15 @@ A API Roguelike de Cartas oferece o backend de um jogo simplificado inspirado em
 - Ao chegar a 0 HP, a run termina como `defeat`.
 - Ao abandonar, a run termina como `abandoned`.
 
+## Consistencia de dados e ranking
+
+- Alteracoes de batalha, run, recompensa e evento de fim devem ser atomicas: uma falha nao pode deixar deck, recompensa, HP ou status parcialmente atualizados.
+- Cada run finalizada deve criar no maximo um evento `run.finished` na outbox.
+- O ranking e atualizado de forma assincrona pelo worker; ele pode demorar alguns segundos para refletir uma run finalizada.
+- A entrega ao ranking e pelo menos uma vez, mas cada `runId` deve alterar os totais somente uma vez.
+- Falhas temporarias de entrega devem usar retry. Depois de dez falhas, o evento deve ficar em `dead_letter` para recuperacao manual.
+- Um evento preso em processamento deve poder ser recuperado depois do timeout do lock.
+
 ## Requisitos de API
 
 - CRUD completo de cartas, inimigos e bosses.

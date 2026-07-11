@@ -23,6 +23,11 @@ scrape_configs:
       - targets: ['game-service:3003']
     metrics_path: /metrics
 
+  - job_name: 'game-outbox-worker'
+    static_configs:
+      - targets: ['game-outbox-worker:3005']
+    metrics_path: /metrics
+
   - job_name: 'ranking-service'
     static_configs:
       - targets: ['ranking-service:3004']

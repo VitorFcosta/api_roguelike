@@ -43,6 +43,9 @@ O jogo tem uma regra central: cada usuário pode ter uma run ativa por vez. Dura
 - Ação de jogar carta em batalha.
 - Escolha de recompensa.
 - Ranking global e estatísticas do usuário.
+- Atualizações atômicas de batalha, run, recompensa e outbox.
+- Entrega assíncrona do resultado ao ranking com retry e dead-letter.
+- Ranking idempotente por `runId`.
 - Swagger para testar a API.
 - Métricas Prometheus e dashboard Grafana.
 - Testes unitários/integrados com Jest e Supertest.
@@ -60,6 +63,7 @@ A visão geral abaixo mostra o papel do gateway, dos microserviços, do MongoDB 
 | `auth-service` | Cadastro, login, usuários e seed do admin |
 | `catalog-service` | Catálogo de cartas, inimigos e bosses |
 | `game-service` | Runs, batalhas, recompensas e regras do jogo |
+| `game-outbox-worker` | Publica resultados de runs no ranking com retry |
 | `ranking-service` | Ranking global e estatísticas do jogador |
 | `mongodb` | Persistência dos dados |
 | `prometheus` | Coleta de métricas |
@@ -74,9 +78,9 @@ Cliente/k6/Swagger
     -> catalog-service
     -> game-service
       -> catalog-service
-      -> ranking-service
     -> ranking-service
-  -> MongoDB
+game-service -> MongoDB (run, batalha, recompensa e outbox na mesma transacao)
+game-outbox-worker -> MongoDB (claim da outbox) -> ranking-service
 Prometheus -> /metrics dos serviços
 Grafana -> Prometheus
 ```
@@ -101,7 +105,9 @@ Isso é importante porque o catálogo pode mudar depois. Se o admin editar uma c
 | `runs` | `game-service` | Tentativas do jogador, HP, floor, deck e status |
 | `battles` | `game-service` | Estado da batalha e log de ações |
 | `rewards` | `game-service` | Opções de recompensa e carta escolhida |
+| `outboxevents` | `game-service` | Eventos pendentes, publicados ou em dead-letter |
 | `rankings` | `ranking-service` | Estatísticas agregadas por usuário |
+| `processedruns` | `ranking-service` | Controle idempotente dos `runId` já aplicados |
 
 O diagrama ER completo e exemplos de documentos ficam em [docs/mongodb-modeling.md](docs/mongodb-modeling.md).
 
@@ -169,7 +175,30 @@ Suba todos os containers:
 npm run up
 ```
 
-Esse comando executa `docker compose up --build -d` e imprime as portas principais no terminal.
+Esse comando executa `docker compose up --build -d` e imprime as portas principais no terminal. Na primeira migração para a outbox, o worker fica propositalmente desligado até o reset controlado do ranking.
+
+Em um ambiente novo, sem ranking anterior para migrar, ative o worker depois que os servicos base estiverem saudaveis:
+
+```bash
+docker compose --profile outbox up -d game-outbox-worker
+```
+
+### Primeiro rollout da outbox
+
+Execute esta sequência uma única vez no ambiente que já possuía dados de ranking:
+
+```bash
+npm run up
+docker compose exec -e CONFIRM_RANKING_RESET=true ranking-service npm run reset:ranking
+docker compose --profile outbox up -d game-outbox-worker
+```
+
+O reset apaga somente `rankings` e `processedruns`. Ele nunca roda automaticamente e falha se `CONFIRM_RANKING_RESET` não for exatamente `true`. Depois desse primeiro rollout, suba o ambiente com o profile do worker:
+
+```bash
+docker compose --profile outbox up --build -d
+```
+ |
 
 Se você já subiu o ambiente e quer apenas rever as portas:
 
@@ -216,8 +245,9 @@ npm run ports
 5. `POST /v1/battles/:id/actions/play-card` joga uma carta.
 6. `POST /v1/rewards/:id/choose` escolhe uma recompensa.
 7. Depois de 5 vitórias comuns, o próximo combate é o boss.
-8. Ao finalizar a run, o ranking é atualizado.
-9. `GET /v1/ranking` consulta o ranking global.
+8. Ao finalizar a run, um evento é salvo na mesma transação do jogo.
+9. O worker entrega o evento ao ranking; reentregas do mesmo `runId` não duplicam totais.
+10. `GET /v1/ranking` consulta o ranking global.
 
 ## Documentação da API
 
@@ -287,6 +317,14 @@ Todos os serviços expõem:
 
 Prometheus coleta métricas dos serviços a cada 15 segundos. Grafana usa o Prometheus como datasource e já possui dashboard provisionado.
 
+O worker expõe apenas dentro da rede Docker:
+
+- `/live`: processo em execução;
+- `/health`: Mongo conectado e loop ativo;
+- `/metrics`: publicados, falhas, dead-letters, pendentes e duração.
+
+As métricas não usam `userId` nem `runId` como labels, evitando cardinalidade crescente no Prometheus.
+
 Query útil no Prometheus:
 
 ```text
@@ -347,11 +385,35 @@ Cuidados que você deve manter:
 | `npm run up` | Sobe containers e mostra portas |
 | `npm run ports` | Mostra URLs e portas configuradas |
 | `npm test` | Roda testes dos workspaces |
+| `npm run reset:ranking` | Apaga ranking e runs processadas; exige `CONFIRM_RANKING_RESET=true` |
+| `npm run outbox:retry -- --event-id <id>` | Reenvia um dead-letter específico |
+| `npm run outbox:retry -- --all` | Reenvia todos os dead-letters |
 | `docker compose ps` | Mostra status dos containers |
 | `docker compose logs -f` | Mostra logs em tempo real |
 | `docker compose logs -f api-gateway` | Mostra logs do gateway |
 | `docker compose down` | Para o ambiente |
 | `docker compose down -v` | Para e apaga volumes |
+
+No ambiente Docker, execute a recuperação dentro do worker:
+
+```bash
+docker compose --profile outbox exec game-outbox-worker npm run outbox:retry -- --event-id <id>
+docker compose --profile outbox exec game-outbox-worker npm run outbox:retry -- --all
+```
+
+## Consistência e limitações do Mongo local
+
+O MongoDB local roda como Replica Set `rs0` de um único nó para permitir transações entre documentos. O inicializador `mongo-init-replica` é idempotente e os serviços só iniciam depois que o nó aceita escrita como primário.
+
+Confira o estado com:
+
+```bash
+docker compose exec mongodb mongosh --quiet --eval "rs.status().ok"
+```
+
+O resultado esperado é `1`. Esse Replica Set de um nó serve apenas para desenvolvimento: ele não oferece alta disponibilidade. Em produção, use MongoDB gerenciado ou um Replica Set com pelo menos três membros.
+
+O worker tenta publicar até 10 vezes. Falhas de rede, timeout, HTTP `408`, `429` e `5xx` usam backoff exponencial limitado a 60 segundos. Outros `4xx` vão diretamente para `dead_letter`. O lock expira em 30 segundos, permitindo que outro ciclo recupere um evento preso após queda do processo.
 
 ## Documentos técnicos
 

@@ -1,189 +1,38 @@
 # Arquitetura
 
-## Desenho recomendado para apresentacao
+Este projeto tem dois fluxos que precisam ser entendidos separadamente:
 
-Use este diagrama no slide de arquitetura. Ele segue a ideia de um diagrama de containers: mostra a entrada publica, os microservicos, o banco, as ferramentas de observabilidade e as comunicacoes principais.
+1. O fluxo sincrono da API: o jogador chama o gateway e recebe a resposta do `game-service`.
+2. O fluxo assincrono do ranking: a run finalizada gera um evento persistido; o worker o entrega depois ao ranking.
 
-Arquivos prontos:
+Separar esses fluxos evita um diagrama com muitas setas e deixa claro que o `game-service` nao chama o ranking durante a requisicao do jogador.
 
-```text
-docs/diagrams/architecture-logical.mmd
-docs/diagrams/architecture-logical.svg
-```
+## Fluxo logico da finalizacao de uma run
 
-Use o `.svg` no Gamma/Canva. Use o `.mmd` se quiser editar o diagrama no Mermaid.
+![Fluxo logico do jogo, outbox e ranking](diagrams/architecture-logical.svg)
 
-```mermaid
-flowchart LR
-  %% Diagrama recomendado para o Slide 3.
-  %% Ideia: mostrar responsabilidades e comunicacao sem excesso de setas.
+Fonte editavel: [architecture-logical.mmd](diagrams/architecture-logical.mmd).
 
-  client["Cliente<br/>Swagger, app ou k6"]
-  k6["k6<br/>carga e stress"]
+Como ler, da esquerda para a direita:
 
-  subgraph api["API Roguelike de Cartas"]
-    direction LR
-
-    gateway["api-gateway<br/>entrada publica<br/>JWT, CORS, rate limit<br/>Swagger e proxy"]
-
-    subgraph services["Microservicos internos"]
-      direction TB
-      auth["auth-service<br/>usuarios, login e JWT"]
-      catalog["catalog-service<br/>cartas, inimigos e bosses"]
-      game["game-service<br/>runs, batalhas e recompensas"]
-      ranking["ranking-service<br/>ranking e estatisticas"]
-    end
-
-    mongo[("MongoDB<br/>banco roguelike")]
-  end
-
-  subgraph obs["Observabilidade"]
-    direction TB
-    prometheus["Prometheus<br/>coleta /metrics"]
-    grafana["Grafana<br/>dashboard"]
-  end
-
-  client -->|"HTTP REST<br/>/v1"| gateway
-  k6 -->|"simula usuarios"| gateway
-
-  gateway -->|"login e usuarios"| auth
-  gateway -->|"CRUD catalogo"| catalog
-  gateway -->|"fluxo de jogo"| game
-  gateway -->|"leaderboard"| ranking
-
-  game -->|"busca cartas,<br/>inimigos e bosses"| catalog
-  game -->|"evento de run finalizada"| ranking
-
-  auth --> mongo
-  catalog --> mongo
-  game --> mongo
-  ranking --> mongo
-
-  prometheus -.->|"scrape /metrics"| gateway
-  prometheus -.->|"scrape /metrics"| auth
-  prometheus -.->|"scrape /metrics"| catalog
-  prometheus -.->|"scrape /metrics"| game
-  prometheus -.->|"scrape /metrics"| ranking
-  grafana -->|"consulta Prometheus"| prometheus
-
-  classDef externalClass fill:#eef7ff,stroke:#1f6feb,stroke-width:1px,color:#0f172a;
-  classDef gatewayClass fill:#0f5132,stroke:#0f5132,stroke-width:2px,color:#ffffff;
-  classDef serviceClass fill:#ecfdf3,stroke:#17803d,stroke-width:1px,color:#0f172a;
-  classDef databaseClass fill:#fff7ed,stroke:#f97316,stroke-width:2px,color:#0f172a;
-  classDef observabilityClass fill:#f5f3ff,stroke:#7c3aed,stroke-width:1px,color:#0f172a;
-
-  class client,k6 externalClass;
-  class gateway gatewayClass;
-  class auth,catalog,game,ranking serviceClass;
-  class mongo databaseClass;
-  class prometheus,grafana observabilityClass;
-
-  style api fill:#ffffff,stroke:#cbd5e1,stroke-width:1px,color:#0f172a
-  style services fill:#ffffff,stroke:#cbd5e1,stroke-width:1px,color:#0f172a
-  style obs fill:#ffffff,stroke:#cbd5e1,stroke-width:1px,color:#0f172a
-```
+1. Cliente e gateway chamam o `game-service`.
+2. O jogo consulta o catalogo quando precisa de cartas, inimigos ou bosses.
+3. Ao finalizar a run, o jogo atualiza `runs`, `battles` e `rewards` e cria `outboxevents` na mesma transacao MongoDB.
+4. O `game-outbox-worker` faz claim do evento pendente e chama o ranking internamente.
+5. O ranking grava `processedruns` e atualiza `rankings` na mesma transacao, impedindo que o mesmo `runId` seja aplicado duas vezes.
 
 ## Deploy local com Docker Compose
 
-Use este segundo diagrama se quiser reforcar o slide de Docker ou Deploy.
+![Deploy local no Docker Compose](diagrams/deploy-local.svg)
 
-Arquivos prontos:
+Fonte editavel: [deploy-local.mmd](diagrams/deploy-local.mmd).
 
-```text
-docs/diagrams/deploy-local.mmd
-docs/diagrams/deploy-local.svg
-```
+Pontos importantes do deploy:
 
-Use o `.svg` no Gamma/Canva. Use o `.mmd` se quiser editar o diagrama no Mermaid.
-
-```mermaid
-flowchart TB
-  %% Diagrama recomendado para Slide 11 ou apoio de Docker/Deploy.
-
-  dev["Desenvolvedor<br/>docker compose up --build -d"]
-
-  subgraph host["Maquina local"]
-    direction TB
-
-    subgraph public["Portas expostas no localhost"]
-      direction LR
-      gatewayPort["API Gateway<br/>localhost:${API_GATEWAY_HOST_PORT}"]
-      swaggerPort["Swagger<br/>localhost:${API_GATEWAY_HOST_PORT}/docs"]
-      prometheusPort["Prometheus<br/>localhost:${PROMETHEUS_PORT}"]
-      grafanaPort["Grafana<br/>localhost:${GRAFANA_PORT}"]
-    end
-
-    subgraph compose["Rede Docker Compose"]
-      direction LR
-
-      gateway["api-gateway<br/>container"]
-
-      subgraph apiServices["Servicos Node.js"]
-        direction TB
-        auth["auth-service<br/>porta interna 3001"]
-        catalog["catalog-service<br/>porta interna 3002"]
-        game["game-service<br/>porta interna 3003"]
-        ranking["ranking-service<br/>porta interna 3004"]
-      end
-
-      mongodb[("mongodb<br/>volume mongodb-data")]
-      prometheus["prometheus<br/>coleta metricas"]
-      grafana["grafana<br/>dashboard provisionado"]
-    end
-  end
-
-  dev --> host
-
-  gatewayPort --> gateway
-  swaggerPort --> gateway
-  prometheusPort --> prometheus
-  grafanaPort --> grafana
-
-  gateway --> auth
-  gateway --> catalog
-  gateway --> game
-  gateway --> ranking
-
-  game --> catalog
-  game --> ranking
-
-  auth --> mongodb
-  catalog --> mongodb
-  game --> mongodb
-  ranking --> mongodb
-
-  prometheus -.-> gateway
-  prometheus -.-> auth
-  prometheus -.-> catalog
-  prometheus -.-> game
-  prometheus -.-> ranking
-  grafana --> prometheus
-
-  classDef commandClass fill:#eef7ff,stroke:#1f6feb,stroke-width:1px,color:#0f172a;
-  classDef portClass fill:#f8fafc,stroke:#64748b,stroke-width:1px,color:#0f172a;
-  classDef gatewayClass fill:#0f5132,stroke:#0f5132,stroke-width:2px,color:#ffffff;
-  classDef serviceClass fill:#ecfdf3,stroke:#17803d,stroke-width:1px,color:#0f172a;
-  classDef databaseClass fill:#fff7ed,stroke:#f97316,stroke-width:2px,color:#0f172a;
-  classDef observabilityClass fill:#f5f3ff,stroke:#7c3aed,stroke-width:1px,color:#0f172a;
-
-  class dev commandClass;
-  class gatewayPort,swaggerPort,prometheusPort,grafanaPort portClass;
-  class gateway gatewayClass;
-  class auth,catalog,game,ranking serviceClass;
-  class mongodb databaseClass;
-  class prometheus,grafana observabilityClass;
-
-  style host fill:#ffffff,stroke:#cbd5e1,stroke-width:1px,color:#0f172a
-  style public fill:#ffffff,stroke:#cbd5e1,stroke-width:1px,color:#0f172a
-  style compose fill:#ffffff,stroke:#cbd5e1,stroke-width:1px,color:#0f172a
-  style apiServices fill:#ffffff,stroke:#cbd5e1,stroke-width:1px,color:#0f172a
-```
-
-## Como explicar o desenho
-
-Use esta fala curta:
-
-> O cliente nunca chama os microservicos diretamente. Toda requisicao entra pelo api-gateway, que valida JWT, aplica CORS/rate limit e encaminha para o servico correto usando tambem o segredo interno `INTERNAL_SERVICE_SECRET`. O game-service conversa internamente com o catalog-service para buscar cartas, inimigos e bosses, e envia um evento ao ranking-service quando a run termina. Todos persistem no MongoDB. Em paralelo, Prometheus coleta metricas dos servicos e Grafana exibe o dashboard.
+- Apenas gateway, Prometheus e Grafana possuem portas publicadas no host.
+- O worker usa a porta interna `3005` para `/live`, `/health` e `/metrics`; ela nao e publicada no host.
+- `mongo-init-replica` executa uma vez e inicializa o Replica Set `rs0` antes dos servicos que dependem do banco.
+- O worker pertence ao profile `outbox`. Em uma migracao com ranking antigo, execute o reset confirmado antes de ativar esse profile.
 
 ## Fluxo de uma run
 
@@ -191,69 +40,50 @@ Use esta fala curta:
 sequenceDiagram
   actor User as Usuario
   participant Gateway as api-gateway
-  participant Auth as auth-service
   participant Game as game-service
   participant Catalog as catalog-service
+  participant Mongo as MongoDB Replica Set
+  participant Worker as game-outbox-worker
   participant Ranking as ranking-service
-
-  User->>Gateway: POST /v1/auth/login
-  Gateway->>Auth: encaminha login
-  Auth-->>Gateway: JWT
-  Gateway-->>User: token
 
   User->>Gateway: POST /v1/runs
   Gateway->>Game: cria run com X-User-Id
   Game->>Catalog: GET /cards/starter
   Catalog-->>Game: deck inicial
-  Game-->>Gateway: run active floor 1
-  Gateway-->>User: run criada
+  Game-->>User: run active
 
-  loop 5 batalhas comuns
-    User->>Gateway: POST /v1/runs/{id}/battles
-    Gateway->>Game: criar batalha
-    Game->>Catalog: GET /enemies/random
-    Catalog-->>Game: inimigo comum
-    Game-->>User: batalha common active
-    User->>Gateway: POST /v1/battles/{id}/actions/play-card
-    Gateway->>Game: jogar carta
-    Game-->>User: batalha victory + reward pending
-    User->>Gateway: POST /v1/rewards/{id}/choose
-    Gateway->>Game: escolher recompensa
-  end
+  User->>Gateway: jogada que finaliza a run
+  Gateway->>Game: play-card ou abandon
+  Game->>Mongo: transacao: estado da run + OutboxEvent pending
+  Game-->>User: run finalizada
 
-  User->>Gateway: POST /v1/runs/{id}/battles
-  Gateway->>Game: criar boss
-  Game->>Catalog: GET /bosses/random
-  Catalog-->>Game: boss
-  Game-->>User: batalha boss active
-  User->>Gateway: POST /v1/battles/{id}/actions/play-card
-  Gateway->>Game: vencer boss
-  Game->>Ranking: POST /ranking/events/run-finished
-  Ranking-->>Game: ranking atualizado
-  Game-->>User: run victory
+  Worker->>Mongo: claim atomico do evento
+  Worker->>Ranking: POST /ranking/events/run-finished
+  Ranking->>Mongo: transacao: ProcessedRun + Ranking
+  Ranking-->>Worker: 200
+  Worker->>Mongo: evento published
 ```
 
-## Responsabilidade dos servicos
+Se o ranking estiver indisponivel, o worker nao perde o evento: ele agenda retry com backoff. Na decima falha, ou diante de um `4xx` permanente, o evento vira `dead_letter` e pode ser reenviado manualmente.
 
-| Servico | Papel |
+## Responsabilidades
+
+| Componente | Papel |
 |---|---|
-| `api-gateway` | Porta publica da API. Valida JWT, aplica CORS/rate limit e encaminha para os servicos internos. |
-| `auth-service` | Cadastra usuarios, faz login, gera JWT e guarda usuarios. |
-| `catalog-service` | Gerencia catalogo de cartas, inimigos e bosses. |
-| `game-service` | Controla regras da run, batalhas, recompensas e fim da run. |
-| `ranking-service` | Atualiza e consulta ranking. |
-| `mongodb` | Persiste dados de todos os servicos. |
-| `prometheus` | Coleta metricas dos endpoints `/metrics`. |
-| `grafana` | Exibe dashboard com saude, requests, erros e latencia. |
+| `api-gateway` | Entrada publica, JWT, CORS, rate limit e proxy. |
+| `auth-service` | Cadastro, login e usuarios. |
+| `catalog-service` | Cartas, inimigos e bosses. |
+| `game-service` | Runs, batalhas, recompensas e criacao atomica do evento de outbox. |
+| `game-outbox-worker` | Claim, retry, dead-letter e entrega do evento ao ranking. |
+| `ranking-service` | Ranking idempotente por `runId`. |
+| `mongo-init-replica` | Inicializacao idempotente do Replica Set local. |
+| `mongodb` | Dados do jogo, outbox e ranking; permite transacoes locais. |
+| `prometheus` | Coleta `/metrics`, inclusive do worker. |
+| `grafana` | Dashboard sobre Prometheus. |
 
-## Fluxo principal
+## Garantias e limites
 
-1. Usuario faz login em `POST /v1/auth/login`.
-2. Gateway valida JWT nas rotas protegidas.
-3. Usuario cria run em `POST /v1/runs`.
-4. `game-service` busca cartas iniciais no `catalog-service`.
-5. Usuario cria e joga batalhas.
-6. Apos 5 batalhas comuns, o `game-service` cria o boss.
-7. Ao finalizar a run, o `game-service` envia evento ao `ranking-service`.
-8. Prometheus coleta metricas de todos os servicos.
-9. Grafana exibe dashboard provisionado.
+- O jogo usa transacoes para evitar atualizacoes parciais entre batalha, run, recompensa e outbox.
+- A entrega da outbox e pelo menos uma vez. O ranking transforma isso em efeito unico usando `processedruns`.
+- O ranking pode demorar alguns segundos para refletir uma run: isso e consistencia eventual intencional.
+- O Replica Set local possui um no e serve apenas para desenvolvimento. Producao exige alta disponibilidade real, com MongoDB gerenciado ou varios membros.

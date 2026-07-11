@@ -1,8 +1,8 @@
 const { Ranking } = require('../models/Ranking');
 
 function createRankingRepository() {
-  async function findByUserId(userId) {
-    return Ranking.findOne({ userId }).lean();
+  async function findByUserId(userId, { session } = {}) {
+    return Ranking.findOne({ userId }).session(session || null).lean();
   }
 
   async function findAll({ limit = 50, page = 1, sort = 'bestScore' } = {}) {
@@ -19,7 +19,7 @@ function createRankingRepository() {
       .lean();
   }
 
-  async function upsertResult({ userId, userName, isVictory, score }) {
+  async function upsertResult({ userId, userName, isVictory, score }, { session } = {}) {
     const now = new Date();
 
     const update = {
@@ -41,11 +41,15 @@ function createRankingRepository() {
     return Ranking.findOneAndUpdate(
       { userId },
       update,
-      { upsert: true, new: true }
+      { upsert: true, new: true, session }
     ).lean();
   }
 
-  return { findByUserId, findAll, upsertResult };
+  async function deleteAll({ session } = {}) {
+    return Ranking.deleteMany({}, { session });
+  }
+
+  return { findByUserId, findAll, upsertResult, deleteAll };
 }
 
 module.exports = { createRankingRepository };

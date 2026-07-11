@@ -5,7 +5,8 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "reset:ranking": "node src/scripts/resetRanking.js"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
@@ -16,6 +17,7 @@
   },
   "devDependencies": {
     "jest": "^29.7.0",
+    "mongodb-memory-server": "^9.1.1",
     "supertest": "^7.0.0"
   }
 }

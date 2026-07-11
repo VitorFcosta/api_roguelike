@@ -5,8 +5,10 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
+    "start:worker": "node src/workers/outboxWorker.js",
     "dev": "nodemon src/server.js",
-    "test": "jest --runInBand --forceExit"
+    "test": "jest --runInBand --forceExit",
+    "outbox:retry": "node src/scripts/retryOutbox.js"
   },
   "dependencies": {
     "dotenv": "^16.0.3",

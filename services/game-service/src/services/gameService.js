@@ -1,24 +1,47 @@
 const { AppError } = require('../errors/AppError');
+const { resolveTurn } = require('../domain/battleEngine');
 
 const PLAYER_MAX_HP = 80;
 const COMMON_BATTLE_COUNT = 5;
-const BOSS_FLOOR = COMMON_BATTLE_COUNT + 1; // 5 batalhas comuns, depois boss
+const BOSS_FLOOR = COMMON_BATTLE_COUNT + 1;
 
 function isDuplicateKey(error) {
   return error?.code === 11000;
+}
+
+function mapCards(cards) {
+  return cards.map((card) => ({
+    cardId: card._id,
+    name: card.name,
+    type: card.type,
+    cost: card.cost,
+    value: card.value,
+    rarity: card.rarity
+  }));
 }
 
 function createGameService({
   runRepository,
   battleRepository,
   rewardRepository,
+  outboxRepository,
   catalogClient,
-  rankingClient
+  runInTransaction = async (work) => work(undefined)
 }) {
-  // RUN 
+  async function getRunById(id, userId, { session } = {}) {
+    const run = await runRepository.findById(id, { session });
+
+    if (!run) {
+      throw new AppError(404, 'RUN_NOT_FOUND', 'Run não encontrada.');
+    }
+    if (String(run.userId) !== String(userId)) {
+      throw new AppError(403, 'FORBIDDEN', 'Acesso negado.');
+    }
+
+    return run;
+  }
 
   async function createRun(userId) {
-    // Impede múltiplas runs ativas simultaneamente
     const existing = await runRepository.findActiveByUserId(userId);
     if (existing) {
       throw new AppError(409, 'RUN_ALREADY_ACTIVE', 'Você já possui uma run ativa.');
@@ -29,15 +52,6 @@ function createGameService({
       throw new AppError(503, 'NO_STARTER_CARDS', 'Nenhuma carta inicial disponível.');
     }
 
-    const deck = starterCards.map((c) => ({
-      cardId: c._id,
-      name: c.name,
-      type: c.type,
-      cost: c.cost,
-      value: c.value,
-      rarity: c.rarity
-    }));
-
     try {
       return await runRepository.create({
         userId,
@@ -45,13 +59,12 @@ function createGameService({
         playerHp: PLAYER_MAX_HP,
         playerMaxHp: PLAYER_MAX_HP,
         floor: 1,
-        deck
+        deck: mapCards(starterCards)
       });
     } catch (error) {
       if (isDuplicateKey(error)) {
         throw new AppError(409, 'RUN_ALREADY_ACTIVE', 'Você já possui uma run ativa.');
       }
-
       throw error;
     }
   }
@@ -60,105 +73,105 @@ function createGameService({
     return runRepository.findByUserId(userId, options);
   }
 
-  async function getRunById(id, userId) {
-    const run = await runRepository.findById(id);
-    if (!run) {
-      throw new AppError(404, 'RUN_NOT_FOUND', 'Run não encontrada.');
-    }
-    if (run.userId !== userId) {
-      throw new AppError(403, 'FORBIDDEN', 'Acesso negado.');
-    }
-    return run;
-  }
-
   async function abandonRun(runId, userId) {
-    const run = await getRunById(runId, userId);
-    if (run.status !== 'active') {
-      throw new AppError(400, 'RUN_NOT_ACTIVE', 'A run não está ativa.');
-    }
+    return runInTransaction(async (session) => {
+      const run = await getRunById(runId, userId, { session });
+      if (run.status !== 'active') {
+        throw new AppError(400, 'RUN_NOT_ACTIVE', 'A run não está ativa.');
+      }
 
-    const updated = await runRepository.update(runId, {
-      status: 'abandoned',
-      finishedAt: new Date()
+      const updated = await runRepository.updateIfStatus(
+        runId,
+        'active',
+        { status: 'abandoned', finishedAt: new Date() },
+        { session }
+      );
+
+      if (!updated) {
+        throw new AppError(409, 'RUN_STATE_CHANGED', 'A run foi alterada por outra ação.');
+      }
+
+      await outboxRepository.createRunFinished(
+        { userId, runId, status: 'abandoned', floor: run.floor },
+        { session }
+      );
+
+      return updated;
     });
-
-    await rankingClient.registerRunResult({
-      userId,
-      runId,
-      status: 'abandoned',
-      floor: run.floor
-    });
-
-    return updated;
   }
-
-  // BATTLE 
 
   async function createBattle(runId, userId) {
-    const run = await getRunById(runId, userId);
-
-    if (run.status !== 'active') {
+    const runSnapshot = await getRunById(runId, userId);
+    if (runSnapshot.status !== 'active') {
       throw new AppError(400, 'RUN_NOT_ACTIVE', 'A run não está ativa.');
     }
 
-    // Verifica se existe recompensa pendente
     const pendingReward = await rewardRepository.findPendingByRunId(runId);
     if (pendingReward) {
-      throw new AppError(
-        400,
-        'REWARD_PENDING',
-        'Escolha sua recompensa antes de iniciar uma nova batalha.'
-      );
+      throw new AppError(400, 'REWARD_PENDING', 'Escolha sua recompensa antes de iniciar uma nova batalha.');
     }
 
-    // Verifica se já existe batalha ativa
     const activeBattle = await battleRepository.findActiveByRunId(runId);
     if (activeBattle) {
       throw new AppError(409, 'BATTLE_ALREADY_ACTIVE', 'Já existe uma batalha ativa nesta run.');
     }
 
-    const isBossFloor = run.floor === BOSS_FLOOR;
+    const isBossFloor = runSnapshot.floor === BOSS_FLOOR;
+    const enemy = isBossFloor
+      ? await catalogClient.getRandomBoss()
+      : await catalogClient.getRandomEnemy();
 
-    let enemy;
-    let battleType;
-
-    if (isBossFloor) {
-      enemy = await catalogClient.getRandomBoss();
-      if (!enemy) {
-        throw new AppError(503, 'NO_BOSS_AVAILABLE', 'Nenhum boss disponível.');
-      }
-      battleType = 'boss';
-    } else {
-      enemy = await catalogClient.getRandomEnemy();
-      if (!enemy) {
-        throw new AppError(503, 'NO_ENEMY_AVAILABLE', 'Nenhum inimigo disponível.');
-      }
-      battleType = 'common';
+    if (!enemy) {
+      const code = isBossFloor ? 'NO_BOSS_AVAILABLE' : 'NO_ENEMY_AVAILABLE';
+      const message = isBossFloor ? 'Nenhum boss disponível.' : 'Nenhum inimigo disponível.';
+      throw new AppError(503, code, message);
     }
 
     try {
-      return await battleRepository.create({
-        runId,
-        type: battleType,
-        status: 'active',
-        enemyId: enemy._id,
-        enemyName: enemy.name,
-        enemyMaxHp: enemy.maxHp,
-        enemyCurrentHp: enemy.maxHp,
-        enemyAttack: enemy.attack,
-        enemyDefense: enemy.defense || 0,
-        enemySpecialAttack: enemy.specialAttack || 0,
-        playerHpAtStart: run.playerHp,
-        playerCurrentHp: run.playerHp,
-        playerBlock: 0,
-        turn: 1,
-        log: [`Batalha contra ${enemy.name} iniciada.`]
+      return await runInTransaction(async (session) => {
+        const currentRun = await getRunById(runId, userId, { session });
+        if (currentRun.status !== 'active') {
+          throw new AppError(400, 'RUN_NOT_ACTIVE', 'A run não está ativa.');
+        }
+        if (currentRun.floor !== runSnapshot.floor) {
+          throw new AppError(409, 'RUN_STATE_CHANGED', 'O andar da run foi alterado. Tente novamente.');
+        }
+
+        const currentReward = await rewardRepository.findPendingByRunId(runId, { session });
+        if (currentReward) {
+          throw new AppError(400, 'REWARD_PENDING', 'Escolha sua recompensa antes de iniciar uma nova batalha.');
+        }
+
+        const currentBattle = await battleRepository.findActiveByRunId(runId, { session });
+        if (currentBattle) {
+          throw new AppError(409, 'BATTLE_ALREADY_ACTIVE', 'Já existe uma batalha ativa nesta run.');
+        }
+
+        return battleRepository.create(
+          {
+            runId,
+            type: isBossFloor ? 'boss' : 'common',
+            status: 'active',
+            enemyId: enemy._id,
+            enemyName: enemy.name,
+            enemyMaxHp: enemy.maxHp,
+            enemyCurrentHp: enemy.maxHp,
+            enemyAttack: enemy.attack,
+            enemyDefense: enemy.defense || 0,
+            enemySpecialAttack: enemy.specialAttack || 0,
+            playerHpAtStart: currentRun.playerHp,
+            playerCurrentHp: currentRun.playerHp,
+            playerBlock: 0,
+            turn: 1,
+            log: [`Batalha contra ${enemy.name} iniciada.`]
+          },
+          { session }
+        );
       });
     } catch (error) {
       if (isDuplicateKey(error)) {
         throw new AppError(409, 'BATTLE_ALREADY_ACTIVE', 'Já existe uma batalha ativa nesta run.');
       }
-
       throw error;
     }
   }
@@ -168,209 +181,120 @@ function createGameService({
     if (!battle) {
       throw new AppError(404, 'BATTLE_NOT_FOUND', 'Batalha não encontrada.');
     }
-    const run = await runRepository.findById(battle.runId);
-    if (!run) {
-      throw new AppError(404, 'RUN_NOT_FOUND', 'Run não encontrada.');
-    }
-    if (run.userId !== userId) {
-      throw new AppError(403, 'FORBIDDEN', 'Acesso negado.');
-    }
+
+    await getRunById(battle.runId, userId);
     return battle;
   }
 
-  // PLAY CARD
-
   async function playCard(battleId, cardId, userId) {
-    const battle = await battleRepository.findById(battleId);
-    if (!battle) {
+    const battleSnapshot = await battleRepository.findById(battleId);
+    if (!battleSnapshot) {
       throw new AppError(404, 'BATTLE_NOT_FOUND', 'Batalha não encontrada.');
     }
-    if (battle.status !== 'active') {
+    if (battleSnapshot.status !== 'active') {
       throw new AppError(400, 'BATTLE_NOT_ACTIVE', 'A batalha não está ativa.');
     }
 
-    const expectedTurn = battle.turn;
-
-    const run = await runRepository.findById(battle.runId);
-    if (!run) {
-      throw new AppError(404, 'RUN_NOT_FOUND', 'Run não encontrada.');
-    }
-    if (run.userId !== userId) {
-      throw new AppError(403, 'FORBIDDEN', 'Acesso negado.');
-    }
-    if (run.status !== 'active') {
+    const runSnapshot = await getRunById(battleSnapshot.runId, userId);
+    if (runSnapshot.status !== 'active') {
       throw new AppError(400, 'RUN_NOT_ACTIVE', 'A run não está ativa.');
     }
 
-    // Encontra a carta no deck
-    const card = run.deck.find((c) => String(c.cardId) === String(cardId));
-    if (!card) {
+    const cardSnapshot = runSnapshot.deck.find((card) => String(card.cardId) === String(cardId));
+    if (!cardSnapshot) {
       throw new AppError(404, 'CARD_NOT_IN_DECK', 'Carta não encontrada no deck.');
     }
 
-    let { playerCurrentHp, playerBlock, enemyCurrentHp } = battle;
-    const log = [...(battle.log || [])];
+    const preview = resolveTurn({ battle: battleSnapshot, run: runSnapshot, card: cardSnapshot });
+    let rewardOptions = null;
 
-    // ── Aplica efeito da carta ──
-    if (card.type === 'attack') {
-      const rawDamage = card.value;
-      const blockedByEnemy = Math.min(rawDamage, battle.enemyDefense);
-      const actualDamage = rawDamage - blockedByEnemy;
-      enemyCurrentHp = Math.max(0, enemyCurrentHp - actualDamage);
-      log.push(`Jogador usou ${card.name} e causou ${actualDamage} de dano.`);
-    } else if (card.type === 'block') {
-      playerBlock += card.value;
-      log.push(`Jogador usou ${card.name} e ganhou ${card.value} de bloqueio.`);
-    } else if (card.type === 'heal') {
-      const hpBeforeHeal = playerCurrentHp;
-      playerCurrentHp = Math.min(run.playerMaxHp, playerCurrentHp + card.value);
-      const healed = playerCurrentHp - hpBeforeHeal;
-      log.push(`Jogador usou ${card.name} e recuperou ${healed} de HP.`);
+    if (preview.outcome === 'victory' && battleSnapshot.type === 'common') {
+      const cards = await catalogClient.getRewardCards(3);
+      if (!Array.isArray(cards) || cards.length < 3) {
+        throw new AppError(
+          503,
+          'INSUFFICIENT_REWARD_CARDS',
+          'Catálogo não possui 3 cartas de recompensa disponíveis.'
+        );
+      }
+      rewardOptions = mapCards(cards.slice(0, 3));
     }
 
-    // ── Ataque automático do inimigo ──
-    const isEnemyAlive = enemyCurrentHp > 0;
-    if (isEnemyAlive) {
-      let enemyDamage = battle.enemyAttack;
-
-      // Boss: a cada 3 turnos usa ataque especial
-      const usedSpecial = battle.type === 'boss' && battle.turn % 3 === 0;
-      if (usedSpecial) {
-        enemyDamage = battle.enemySpecialAttack || battle.enemyAttack * 2;
+    return runInTransaction(async (session) => {
+      const battle = await battleRepository.findById(battleId, { session });
+      if (!battle || battle.status !== 'active' || battle.turn !== battleSnapshot.turn) {
+        throw new AppError(409, 'BATTLE_STATE_CHANGED', 'A batalha foi alterada por outra ação.');
       }
 
-      const damageAfterBlock = Math.max(0, enemyDamage - playerBlock);
-      playerCurrentHp = Math.max(0, playerCurrentHp - damageAfterBlock);
-      playerBlock = Math.max(0, playerBlock - enemyDamage); // bloco se esgota
-
-      if (usedSpecial) {
-        log.push(`Boss usou ataque especial causando ${damageAfterBlock} de dano.`);
-      } else if (damageAfterBlock > 0) {
-        log.push(`Inimigo atacou causando ${damageAfterBlock} de dano.`);
-      } else {
-        log.push('Inimigo atacou, mas o bloqueio absorveu todo o dano.');
+      const run = await getRunById(battle.runId, userId, { session });
+      if (run.status !== 'active') {
+        throw new AppError(400, 'RUN_NOT_ACTIVE', 'A run não está ativa.');
       }
-    }
 
-    const playerDied = playerCurrentHp <= 0;
-    const enemyDied = enemyCurrentHp <= 0;
-
-    const nextTurn = battle.turn + 1;
-    let battleStatus = 'active';
-    let battleFinishedAt = null;
-
-    if (enemyDied) {
-      battleStatus = 'victory';
-      battleFinishedAt = new Date();
-      log.push('Inimigo derrotado.');
-    } else if (playerDied) {
-      battleStatus = 'defeat';
-      battleFinishedAt = new Date();
-      log.push('Jogador derrotado.');
-    }
-
-    // Atualiza batalha
-    const updatedBattle = await battleRepository.updateIfActiveAtTurn(
-      battleId,
-      expectedTurn,
-      {
-        playerCurrentHp,
-        playerBlock: Math.max(0, playerBlock),
-        enemyCurrentHp,
-        turn: nextTurn,
-        status: battleStatus,
-        log,
-        finishedAt: battleFinishedAt
+      const card = run.deck.find((item) => String(item.cardId) === String(cardId));
+      if (!card) {
+        throw new AppError(404, 'CARD_NOT_IN_DECK', 'Carta não encontrada no deck.');
       }
-    );
 
-    if (!updatedBattle) {
-      throw new AppError(
-        409,
-        'BATTLE_STATE_CHANGED',
-        'A batalha foi alterada por outra ação. Atualize o estado e tente novamente.'
+      const resolution = resolveTurn({ battle, run, card });
+      if (resolution.outcome === 'victory' && battle.type === 'common' && !rewardOptions) {
+        throw new AppError(409, 'BATTLE_STATE_CHANGED', 'O resultado da batalha mudou. Tente novamente.');
+      }
+
+      const updatedBattle = await battleRepository.updateIfActiveAtTurn(
+        battleId,
+        battle.turn,
+        resolution.battlePatch,
+        { session }
       );
-    }
+      if (!updatedBattle) {
+        throw new AppError(409, 'BATTLE_STATE_CHANGED', 'A batalha foi alterada por outra ação.');
+      }
 
-    // Atualiza HP do jogador na run
-    await runRepository.update(run._id, { playerHp: playerCurrentHp });
+      const runPatch = { playerHp: resolution.playerCurrentHp };
+      if (resolution.outcome === 'victory' && battle.type === 'common') {
+        runPatch.floor = run.floor + 1;
+      } else if (resolution.outcome === 'victory') {
+        runPatch.status = 'victory';
+        runPatch.finishedAt = resolution.battlePatch.finishedAt;
+      } else if (resolution.outcome === 'defeat') {
+        runPatch.status = 'defeat';
+        runPatch.finishedAt = resolution.battlePatch.finishedAt;
+      }
 
-    // ── Pós-batalha ──
-    if (battleStatus === 'victory') {
-      await _handleVictory(run, updatedBattle);
-    } else if (battleStatus === 'defeat') {
-      await _handleDefeat(run, userId);
-    }
-
-    return updatedBattle;
-  }
-
-  // ─── HANDLERS PÓS-BATALHA ─────────────────────────────────────────────────
-
-  async function _handleVictory(run, battle) {
-    const isBossVictory = battle.type === 'boss';
-
-    if (isBossVictory) {
-      // Vitória total da run
-      await runRepository.update(run._id, {
-        status: 'victory',
-        finishedAt: new Date()
-      });
-      await rankingClient.registerRunResult({
-        userId: run.userId,
-        runId: run._id,
-        status: 'victory',
-        floor: run.floor
-      });
-    } else {
-      // Avança andar e gera recompensa
-      await runRepository.update(run._id, { floor: run.floor + 1 });
-      await _generateReward(run._id, battle._id);
-    }
-  }
-
-  async function _handleDefeat(run, userId) {
-    await runRepository.update(run._id, {
-      status: 'defeat',
-      finishedAt: new Date()
-    });
-    await rankingClient.registerRunResult({
-      userId,
-      runId: run._id,
-      status: 'defeat',
-      floor: run.floor
-    });
-  }
-
-  // ─── REWARD ────────────────────────────────────────────────────────────────
-
-  async function _generateReward(runId, battleId) {
-    const cards = await catalogClient.getRewardCards(3);
-
-    if (!Array.isArray(cards) || cards.length < 3) {
-      throw new AppError(
-        503,
-        'INSUFFICIENT_REWARD_CARDS',
-        'Catálogo não possui 3 cartas de recompensa disponíveis.'
+      const updatedRun = await runRepository.updateIfStatus(
+        run._id,
+        'active',
+        runPatch,
+        { session }
       );
-    }
+      if (!updatedRun) {
+        throw new AppError(409, 'RUN_STATE_CHANGED', 'A run foi alterada por outra ação.');
+      }
 
-    const options = cards.slice(0, 3).map((c) => ({
-      cardId: c._id,
-      name: c.name,
-      type: c.type,
-      cost: c.cost,
-      value: c.value,
-      rarity: c.rarity
-    }));
+      if (resolution.outcome === 'victory' && battle.type === 'common') {
+        await rewardRepository.create(
+          { runId: run._id, battleId: battle._id, status: 'pending', options: rewardOptions },
+          { session }
+        );
+      } else if (resolution.outcome === 'victory' || resolution.outcome === 'defeat') {
+        await outboxRepository.createRunFinished(
+          {
+            userId: run.userId,
+            runId: run._id,
+            status: resolution.outcome,
+            floor: run.floor
+          },
+          { session }
+        );
+      }
 
-    return rewardRepository.create({ runId, battleId, status: 'pending', options });
+      return updatedBattle;
+    });
   }
 
   async function getRewards(runId, userId) {
-    // Valida acesso à run
     await getRunById(runId, userId);
-
     const reward = await rewardRepository.findPendingByRunId(runId);
     if (!reward) {
       throw new AppError(404, 'REWARD_NOT_FOUND', 'Nenhuma recompensa pendente nesta run.');
@@ -379,43 +303,37 @@ function createGameService({
   }
 
   async function chooseReward(rewardId, cardId, userId) {
-    const reward = await rewardRepository.findById(rewardId);
-    if (!reward) {
-      throw new AppError(404, 'REWARD_NOT_FOUND', 'Recompensa não encontrada.');
-    }
-    if (reward.status !== 'pending') {
-      throw new AppError(400, 'REWARD_ALREADY_CHOSEN', 'Recompensa já foi escolhida.');
-    }
+    return runInTransaction(async (session) => {
+      const reward = await rewardRepository.findById(rewardId, { session });
+      if (!reward) {
+        throw new AppError(404, 'REWARD_NOT_FOUND', 'Recompensa não encontrada.');
+      }
+      if (reward.status !== 'pending') {
+        throw new AppError(400, 'REWARD_ALREADY_CHOSEN', 'Recompensa já foi escolhida.');
+      }
 
-    // Valida acesso à run
-    const run = await getRunById(reward.runId, userId);
-    if (run.status !== 'active') {
-      throw new AppError(400, 'RUN_NOT_ACTIVE', 'A run não está ativa.');
-    }
+      const run = await getRunById(reward.runId, userId, { session });
+      if (run.status !== 'active') {
+        throw new AppError(400, 'RUN_NOT_ACTIVE', 'A run não está ativa.');
+      }
 
-    // Valida se a carta escolhida é uma das opções
-    const chosen = reward.options.find((o) => String(o.cardId) === String(cardId));
-    if (!chosen) {
-      throw new AppError(400, 'INVALID_CARD_CHOICE', 'Carta inválida para esta recompensa.');
-    }
+      const chosen = reward.options.find((option) => String(option.cardId) === String(cardId));
+      if (!chosen) {
+        throw new AppError(400, 'INVALID_CARD_CHOICE', 'Carta inválida para esta recompensa.');
+      }
 
-    const claimedReward = await rewardRepository.claim(rewardId, chosen.cardId);
+      const claimedReward = await rewardRepository.claim(rewardId, chosen.cardId, { session });
+      if (!claimedReward) {
+        throw new AppError(409, 'REWARD_ALREADY_CHOSEN', 'Esta recompensa já foi escolhida por outra ação.');
+      }
 
-    if (!claimedReward) {
-      throw new AppError(
-        409,
-        'REWARD_ALREADY_CHOSEN',
-        'Esta recompensa já foi escolhida por outra ação.'
-      );
-    }
+      const updatedRun = await runRepository.addCardToDeck(reward.runId, chosen, { session });
+      if (!updatedRun) {
+        throw new AppError(500, 'RUN_UPDATE_FAILED', 'Não foi possível adicionar a carta ao deck.');
+      }
 
-    const updatedRun = await runRepository.addCardToDeck(claimedReward.runId, chosen);
-
-    if (!updatedRun) {
-      throw new AppError(500, 'RUN_UPDATE_FAILED', 'Não foi possível adicionar a carta ao deck.');
-    }
-
-    return claimedReward;
+      return claimedReward;
+    });
   }
 
   return {

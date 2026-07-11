@@ -6,8 +6,9 @@ const { loadConfig } = require('./config/env');
 const { createRunRepository } = require('./repositories/runRepository');
 const { createBattleRepository } = require('./repositories/battleRepository');
 const { createRewardRepository } = require('./repositories/rewardRepository');
+const { createOutboxRepository } = require('./repositories/outboxRepository');
+const { runInTransaction } = require('./config/database');
 const { createCatalogClient } = require('./services/catalogClient');
-const { createRankingClient } = require('./services/rankingClient');
 const { createGameService } = require('./services/gameService');
 const { createRunRoutes } = require('./routes/runRoutes');
 const { createBattleRoutes } = require('./routes/battleRoutes');
@@ -23,21 +24,18 @@ function createApp(options = {}) {
   const runRepository = options.runRepository || createRunRepository();
   const battleRepository = options.battleRepository || createBattleRepository();
   const rewardRepository = options.rewardRepository || createRewardRepository();
+  const outboxRepository = options.outboxRepository || createOutboxRepository();
 
   const catalogClient =
     options.catalogClient || createCatalogClient(config.catalogServiceUrl);
-  const rankingClient =
-    options.rankingClient || createRankingClient({
-      baseUrl: config.rankingServiceUrl,
-      internalServiceSecret: config.internalServiceSecret
-    });
 
   const gameService = createGameService({
     runRepository,
     battleRepository,
     rewardRepository,
+    outboxRepository,
     catalogClient,
-    rankingClient
+    runInTransaction: options.runInTransaction || runInTransaction
   });
 
   const { metricsMiddleware, metricsEndpoint } = createMetrics('game_service');

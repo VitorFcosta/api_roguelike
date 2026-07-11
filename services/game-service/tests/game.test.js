@@ -47,6 +47,7 @@ function makeStores() {
   const runs = new Map();
   const battles = new Map();
   const rewards = new Map();
+  const outboxEvents = new Map();
 
   const runRepo = {
     async create(data) {
@@ -72,6 +73,12 @@ function makeStores() {
     async update(id, data) {
       const doc = runs.get(String(id));
       if (!doc) return null;
+      Object.assign(doc, data);
+      return doc;
+    },
+    async updateIfStatus(id, expectedStatus, data) {
+      const doc = runs.get(String(id));
+      if (!doc || doc.status !== expectedStatus) return null;
       Object.assign(doc, data);
       return doc;
     },
@@ -138,7 +145,28 @@ function makeStores() {
     }
   };
 
-  return { runRepo, battleRepo, rewardRepo };
+  const outboxRepo = {
+    async createRunFinished(payload) {
+      const key = `run.finished:${String(payload.runId)}`;
+      if (outboxEvents.has(key)) {
+        const error = new Error('duplicate outbox event');
+        error.code = 11000;
+        throw error;
+      }
+      const doc = {
+        _id: newId(),
+        type: 'run.finished',
+        aggregateId: String(payload.runId),
+        payload: { ...payload, runId: String(payload.runId) },
+        status: 'pending',
+        attempts: 0
+      };
+      outboxEvents.set(key, doc);
+      return doc;
+    }
+  };
+
+  return { runRepo, battleRepo, rewardRepo, outboxRepo, outboxEvents };
 }
 
 function makeCatalogClient(overrides = {}) {
@@ -153,20 +181,17 @@ function makeCatalogClient(overrides = {}) {
   };
 }
 
-function makeRankingClient() {
-  return { registerRunResult: jest.fn().mockResolvedValue(undefined) };
-}
-
 function makeService(catalogOverrides = {}) {
-  const { runRepo, battleRepo, rewardRepo } = makeStores();
+  const { runRepo, battleRepo, rewardRepo, outboxRepo, outboxEvents } = makeStores();
   const service = createGameService({
     runRepository:    runRepo,
     battleRepository: battleRepo,
     rewardRepository: rewardRepo,
+    outboxRepository: outboxRepo,
     catalogClient:    makeCatalogClient(catalogOverrides),
-    rankingClient:    makeRankingClient()
+    runInTransaction: async (work) => work(undefined)
   });
-  return { service, runRepo, battleRepo, rewardRepo };
+  return { service, runRepo, battleRepo, rewardRepo, outboxRepo, outboxEvents };
 }
 
 const USER_ID  = 'user-001';
@@ -477,15 +502,15 @@ describe('Finalizar run como derrota', () => {
     expect(updatedRun.status).toBe('defeat');
   });
 
-  test('chama rankingClient ao finalizar run como derrota', async () => {
-    const { runRepo, battleRepo, rewardRepo } = makeStores();
-    const rankingClient = makeRankingClient();
+  test('cria um evento de outbox ao finalizar run como derrota', async () => {
+    const { runRepo, battleRepo, rewardRepo, outboxRepo, outboxEvents } = makeStores();
     const service = createGameService({
       runRepository:    runRepo,
       battleRepository: battleRepo,
       rewardRepository: rewardRepo,
+      outboxRepository: outboxRepo,
       catalogClient:    makeCatalogClient({ getRandomEnemy: jest.fn().mockResolvedValue(STRONG_ENEMY) }),
-      rankingClient
+      runInTransaction: async (work) => work(undefined)
     });
 
     const run = await service.createRun(USER_ID);
@@ -498,9 +523,12 @@ describe('Finalizar run como derrota', () => {
       status = b.status;
     }
 
-    expect(rankingClient.registerRunResult).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'defeat', userId: USER_ID, floor: 1 })
-    );
+    expect([...outboxEvents.values()]).toEqual([
+      expect.objectContaining({
+        type: 'run.finished',
+        payload: expect.objectContaining({ status: 'defeat', userId: USER_ID, floor: 1 })
+      })
+    ]);
   });
 });
 
@@ -549,15 +577,15 @@ describe('Finalizar run como vitória contra boss', () => {
     expect(updatedRun.status).toBe('victory');
   });
 
-  test('chama rankingClient ao vencer boss', async () => {
-    const { runRepo, battleRepo, rewardRepo } = makeStores();
-    const rankingClient = makeRankingClient();
+  test('cria um evento de outbox ao vencer boss', async () => {
+    const { runRepo, battleRepo, rewardRepo, outboxRepo, outboxEvents } = makeStores();
     const service = createGameService({
       runRepository:    runRepo,
       battleRepository: battleRepo,
       rewardRepository: rewardRepo,
+      outboxRepository: outboxRepo,
       catalogClient:    makeCatalogClient(),
-      rankingClient
+      runInTransaction: async (work) => work(undefined)
     });
 
     const run = await service.createRun(USER_ID);
@@ -575,9 +603,12 @@ describe('Finalizar run como vitória contra boss', () => {
     await service.playCard(bossBattle._id, attackCard.cardId, USER_ID);
     await service.playCard(bossBattle._id, attackCard.cardId, USER_ID);
 
-    expect(rankingClient.registerRunResult).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'victory', userId: USER_ID })
-    );
+    expect([...outboxEvents.values()]).toEqual([
+      expect.objectContaining({
+        type: 'run.finished',
+        payload: expect.objectContaining({ status: 'victory', userId: USER_ID })
+      })
+    ]);
   });
 });
 

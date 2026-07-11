@@ -28,4 +28,21 @@ async function disconnectFromDatabase() {
   await mongoose.disconnect();
 }
 
-module.exports = { connectToDatabase, disconnectFromDatabase };
+async function runInTransaction(work) {
+  let result;
+
+  await mongoose.connection.transaction(
+    async (session) => {
+      result = await work(session);
+    },
+    {
+      readPreference: 'primary',
+      readConcern: { level: 'snapshot' },
+      writeConcern: { w: 'majority' }
+    }
+  );
+
+  return result;
+}
+
+module.exports = { connectToDatabase, disconnectFromDatabase, runInTransaction };

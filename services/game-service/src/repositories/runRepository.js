@@ -8,12 +8,17 @@ function parsePagination({ limit = 50, page = 1 } = {}) {
 
 function createRunRepository() {
   return {
-    async create(data) {
+    async create(data, { session } = {}) {
+      if (session) {
+        const [run] = await Run.create([data], { session });
+        return run;
+      }
+
       return Run.create(data);
     },
 
-    async findById(id) {
-      return Run.findById(id);
+    async findById(id, { session } = {}) {
+      return Run.findById(id).session(session || null);
     },
 
     async findByUserId(userId, options = {}) {
@@ -28,16 +33,32 @@ function createRunRepository() {
         .limit(limit);
     },
 
-    async findActiveByUserId(userId) {
-      return Run.findOne({ userId, status: 'active' });
+    async findActiveByUserId(userId, { session } = {}) {
+      return Run.findOne({ userId, status: 'active' }).session(session || null);
     },
 
-    async update(id, data) {
-      return Run.findByIdAndUpdate(id, { $set: data }, { new: true, runValidators: true });
+    async update(id, data, { session } = {}) {
+      return Run.findByIdAndUpdate(
+        id,
+        { $set: data },
+        { new: true, runValidators: true, session }
+      );
     },
 
-    async addCardToDeck(id, card) {
-      return Run.findByIdAndUpdate(id, { $push: { deck: card } }, { new: true });
+    async updateIfStatus(id, status, data, { session } = {}) {
+      return Run.findOneAndUpdate(
+        { _id: id, status },
+        { $set: data },
+        { new: true, runValidators: true, session }
+      );
+    },
+
+    async addCardToDeck(id, card, { session } = {}) {
+      return Run.findByIdAndUpdate(
+        id,
+        { $push: { deck: card } },
+        { new: true, runValidators: true, session }
+      );
     }
   };
 }

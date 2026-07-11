@@ -10,6 +10,8 @@
     "ports": "node scripts/showPorts.js",
     "test": "npm run test --workspaces --if-present",
     "test:auth": "npm run test --workspace services/auth-service",
-    "test:gateway": "npm run test --workspace services/api-gateway"
+    "test:gateway": "npm run test --workspace services/api-gateway",
+    "reset:ranking": "npm run reset:ranking --workspace services/ranking-service",
+    "outbox:retry": "npm run outbox:retry --workspace services/game-service --"
   }
 }

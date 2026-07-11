@@ -71,7 +71,29 @@ Rota interna entre servicos:
 
 - `POST /ranking/events/run-finished`
 
-Essa rota interna existe no `ranking-service`, mas nao e exposta publicamente pelo gateway. Ela exige o header `X-Internal-Service-Secret`, cujo valor vem de `INTERNAL_SERVICE_SECRET`.
+Essa rota interna existe no `ranking-service`, mas nao e exposta publicamente pelo gateway. O `game-outbox-worker` a chama depois de obter um evento `run.finished` da outbox. Ela exige o header `X-Internal-Service-Secret`, cujo valor vem de `INTERNAL_SERVICE_SECRET`.
+
+Payload aceito:
+
+```json
+{
+  "runId": "run-123",
+  "userId": "user-456",
+  "status": "victory",
+  "floor": 6,
+  "userName": "Opcional"
+}
+```
+
+- `runId`, `userId` e `status` sao obrigatorios.
+- `runId` e uma string nao vazia de, no maximo, 100 caracteres.
+- `status` aceita `victory`, `defeat` ou `abandoned`.
+- `floor` e inteiro entre `1` e `100`; se omitido, usa `1`.
+- `userName` e opcional; o ranking gera um nome de fallback quando ele nao existe.
+- Reenviar o mesmo `runId` com `userId`, `status` e `floor` identicos retorna `200` sem incrementar os totais novamente.
+- Reutilizar um `runId` com esses dados diferentes retorna `409 RUN_EVENT_CONFLICT`.
+
+O alias interno temporario `POST /rankings` continua disponivel e segue as mesmas regras. Nenhuma das duas rotas deve ser chamada pelo cliente ou pelo gateway publico.
 
 ## Infra
 

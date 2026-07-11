@@ -4,6 +4,8 @@ const mongoose = require('mongoose');
 const { loadConfig } = require('./config/env');
 const { errorHandler } = require('./middlewares/errorHandler');
 const { createRankingRepository } = require('./repositories/rankingRepository');
+const { createProcessedRunRepository } = require('./repositories/processedRunRepository');
+const { runInTransaction } = require('./config/database');
 const { createRankingService } = require('./services/rankingService');
 const { createRankingRoutes } = require('./routes/rankingRoutes');
 const { sendSuccess, sendError } = require('./utils/responses');
@@ -13,7 +15,12 @@ function createApp(options = {}) {
   const config = options.config || loadConfig();
   const isDatabaseReady = options.isDatabaseReady || (() => mongoose.connection.readyState === 1);
   const rankingRepository = options.rankingRepository || createRankingRepository();
-  const rankingService = createRankingService({ rankingRepository });
+  const processedRunRepository = options.processedRunRepository || createProcessedRunRepository();
+  const rankingService = createRankingService({
+    rankingRepository,
+    processedRunRepository,
+    runInTransaction: options.runInTransaction || runInTransaction
+  });
   const { metricsMiddleware, metricsEndpoint } = createMetrics('ranking_service');
 
   const app = express();

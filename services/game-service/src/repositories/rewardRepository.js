@@ -2,23 +2,32 @@ const { Reward } = require('../models/Reward');
 
 function createRewardRepository() {
   return {
-    async create(data) {
+    async create(data, { session } = {}) {
+      if (session) {
+        const [reward] = await Reward.create([data], { session });
+        return reward;
+      }
+
       return Reward.create(data);
     },
 
-    async findById(id) {
-      return Reward.findById(id);
+    async findById(id, { session } = {}) {
+      return Reward.findById(id).session(session || null);
     },
 
-    async findPendingByRunId(runId) {
-      return Reward.findOne({ runId, status: 'pending' });
+    async findPendingByRunId(runId, { session } = {}) {
+      return Reward.findOne({ runId, status: 'pending' }).session(session || null);
     },
 
-    async update(id, data) {
-      return Reward.findByIdAndUpdate(id, { $set: data }, { new: true, runValidators: true });
+    async update(id, data, { session } = {}) {
+      return Reward.findByIdAndUpdate(
+        id,
+        { $set: data },
+        { new: true, runValidators: true, session }
+      );
     },
 
-    async claim(id, cardId) {
+    async claim(id, cardId, { session } = {}) {
       return Reward.findOneAndUpdate(
         { _id: id, status: 'pending', 'options.cardId': cardId },
         {
@@ -28,7 +37,7 @@ function createRewardRepository() {
             chosenAt: new Date()
           }
         },
-        { new: true, runValidators: true }
+        { new: true, runValidators: true, session }
       );
     }
   };

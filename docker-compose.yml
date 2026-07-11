@@ -5,6 +5,7 @@ services:
     image: mongo:7
     container_name: roguelike-mongodb
     restart: unless-stopped
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     volumes:
       - mongodb-data:/data/db
     healthcheck:
@@ -13,6 +14,17 @@ services:
       timeout: 5s
       retries: 5
 
+  mongo-init-replica:
+    image: mongo:7
+    container_name: roguelike-mongo-init-replica
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    volumes:
+      - ./infra/mongo/init-replica.js:/scripts/init-replica.js:ro
+    command: ["mongosh", "mongodb://mongodb:27017/admin", "/scripts/init-replica.js"]
+    restart: "no"
+
   # ─── SERVIÇOS ──────────────────────────────────────────────────────────────
   auth-service:
     build:
@@ -20,12 +32,12 @@ services:
     container_name: roguelike-auth-service
     restart: unless-stopped
     depends_on:
-      mongodb:
-        condition: service_healthy
+      mongo-init-replica:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: development
       AUTH_SERVICE_PORT: 3001
-      MONGO_URI: mongodb://mongodb:27017/roguelike
+      MONGO_URI: mongodb://mongodb:27017/roguelike?replicaSet=rs0
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET obrigatorio. Copie .env.example para .env e altere o valor}
       JWT_ISSUER: ${JWT_ISSUER:-roguelike-api}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-roguelike-client}
@@ -47,12 +59,12 @@ services:
     container_name: roguelike-catalog-service
     restart: unless-stopped
     depends_on:
-      mongodb:
-        condition: service_healthy
+      mongo-init-replica:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: development
       CATALOG_SERVICE_PORT: 3002
-      MONGO_URI: mongodb://mongodb:27017/roguelike
+      MONGO_URI: mongodb://mongodb:27017/roguelike?replicaSet=rs0
       INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:?INTERNAL_SERVICE_SECRET obrigatorio}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3002/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
@@ -66,16 +78,14 @@ services:
     container_name: roguelike-game-service
     restart: unless-stopped
     depends_on:
-      mongodb:
-        condition: service_healthy
+      mongo-init-replica:
+        condition: service_completed_successfully
       catalog-service:
-        condition: service_healthy
-      ranking-service:
         condition: service_healthy
     environment:
       NODE_ENV: development
       GAME_SERVICE_PORT: 3003
-      MONGO_URI: mongodb://mongodb:27017/roguelike
+      MONGO_URI: mongodb://mongodb:27017/roguelike?replicaSet=rs0
       CATALOG_SERVICE_URL: http://catalog-service:3002
       RANKING_SERVICE_URL: http://ranking-service:3004
       INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:?INTERNAL_SERVICE_SECRET obrigatorio}
@@ -91,15 +101,46 @@ services:
     container_name: roguelike-ranking-service
     restart: unless-stopped
     depends_on:
-      mongodb:
-        condition: service_healthy
+      mongo-init-replica:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: development
       RANKING_SERVICE_PORT: 3004
-      MONGO_URI: mongodb://mongodb:27017/roguelike
+      MONGO_URI: mongodb://mongodb:27017/roguelike?replicaSet=rs0
       INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:?INTERNAL_SERVICE_SECRET obrigatorio}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3004/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  game-outbox-worker:
+    profiles: ["outbox"]
+    build:
+      context: ./services/game-service
+    container_name: roguelike-game-outbox-worker
+    command: ["npm", "run", "start:worker"]
+    restart: unless-stopped
+    depends_on:
+      mongo-init-replica:
+        condition: service_completed_successfully
+      ranking-service:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      MONGO_URI: mongodb://mongodb:27017/roguelike?replicaSet=rs0
+      RANKING_SERVICE_URL: http://ranking-service:3004
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:?INTERNAL_SERVICE_SECRET obrigatorio}
+      OUTBOX_POLL_INTERVAL_MS: ${OUTBOX_POLL_INTERVAL_MS:-1000}
+      OUTBOX_BATCH_SIZE: ${OUTBOX_BATCH_SIZE:-20}
+      OUTBOX_MAX_ATTEMPTS: ${OUTBOX_MAX_ATTEMPTS:-10}
+      OUTBOX_BASE_DELAY_MS: ${OUTBOX_BASE_DELAY_MS:-1000}
+      OUTBOX_MAX_DELAY_MS: ${OUTBOX_MAX_DELAY_MS:-60000}
+      OUTBOX_LOCK_TIMEOUT_MS: ${OUTBOX_LOCK_TIMEOUT_MS:-30000}
+      OUTBOX_HTTP_TIMEOUT_MS: ${OUTBOX_HTTP_TIMEOUT_MS:-5000}
+      OUTBOX_METRICS_PORT: ${OUTBOX_METRICS_PORT:-3005}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3005/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 5

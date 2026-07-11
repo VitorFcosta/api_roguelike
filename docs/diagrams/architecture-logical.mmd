@@ -1,67 +1,35 @@
 flowchart LR
-  %% Diagrama recomendado para o Slide 3.
-  %% Ideia: mostrar responsabilidades e comunicacao sem excesso de setas.
+  client["Cliente"]
+  gateway["API Gateway<br/>entrada publica"]
+  game["game-service<br/>regras da run"]
+  catalog["catalog-service<br/>cartas e inimigos"]
+  worker["game-outbox-worker<br/>entrega assincrona"]
+  ranking["ranking-service<br/>ranking idempotente"]
 
-  client["Cliente<br/>Swagger, app ou k6"]
-  k6["k6<br/>carga e stress"]
-
-  subgraph api["API Roguelike de Cartas"]
-    direction LR
-
-    gateway["api-gateway<br/>entrada publica<br/>JWT, CORS, rate limit<br/>Swagger e proxy"]
-
-    subgraph services["Microservicos internos"]
-      direction TB
-      auth["auth-service<br/>usuarios, login e JWT"]
-      catalog["catalog-service<br/>cartas, inimigos e bosses"]
-      game["game-service<br/>runs, batalhas e recompensas"]
-      ranking["ranking-service<br/>ranking e estatisticas"]
-    end
-
-    mongo[("MongoDB<br/>banco roguelike")]
-  end
-
-  subgraph obs["Observabilidade"]
+  subgraph database["MongoDB Replica Set rs0"]
     direction TB
-    prometheus["Prometheus<br/>coleta /metrics"]
-    grafana["Grafana<br/>dashboard"]
+    gameState[("runs, battles,<br/>rewards")]
+    outbox[("outboxevents")]
+    rankingState[("rankings,<br/>processedruns")]
   end
 
-  client -->|"HTTP REST<br/>/v1"| gateway
-  k6 -->|"simula usuarios"| gateway
+  client --> gateway --> game
+  gateway -->|"consulta"| ranking
+  game -.->|"consulta"| catalog
+  game -->|"1. atualiza"| gameState
+  game -->|"2. mesma transacao"| outbox
+  outbox -->|"3. claim"| worker
+  worker -->|"4. POST interno"| ranking
+  ranking -->|"5. processa uma vez"| rankingState
 
-  gateway -->|"login e usuarios"| auth
-  gateway -->|"CRUD catalogo"| catalog
-  gateway -->|"fluxo de jogo"| game
-  gateway -->|"leaderboard"| ranking
+  classDef entry fill:#0f5132,stroke:#0f5132,stroke-width:2px,color:#ffffff;
+  classDef service fill:#ecfdf3,stroke:#17803d,stroke-width:1px,color:#0f172a;
+  classDef worker fill:#f5f3ff,stroke:#7c3aed,stroke-width:2px,color:#0f172a;
+  classDef storage fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#0f172a;
 
-  game -->|"busca cartas,<br/>inimigos e bosses"| catalog
-  game -->|"evento de run finalizada"| ranking
+  class client,gateway entry;
+  class game,catalog,ranking service;
+  class worker worker;
+  class gameState,outbox,rankingState storage;
 
-  auth --> mongo
-  catalog --> mongo
-  game --> mongo
-  ranking --> mongo
-
-  prometheus -.->|"scrape /metrics"| gateway
-  prometheus -.->|"scrape /metrics"| auth
-  prometheus -.->|"scrape /metrics"| catalog
-  prometheus -.->|"scrape /metrics"| game
-  prometheus -.->|"scrape /metrics"| ranking
-  grafana -->|"consulta Prometheus"| prometheus
-
-  classDef externalClass fill:#eef7ff,stroke:#1f6feb,stroke-width:1px,color:#0f172a;
-  classDef gatewayClass fill:#0f5132,stroke:#0f5132,stroke-width:2px,color:#ffffff;
-  classDef serviceClass fill:#ecfdf3,stroke:#17803d,stroke-width:1px,color:#0f172a;
-  classDef databaseClass fill:#fff7ed,stroke:#f97316,stroke-width:2px,color:#0f172a;
-  classDef observabilityClass fill:#f5f3ff,stroke:#7c3aed,stroke-width:1px,color:#0f172a;
-
-  class client,k6 externalClass;
-  class gateway gatewayClass;
-  class auth,catalog,game,ranking serviceClass;
-  class mongo databaseClass;
-  class prometheus,grafana observabilityClass;
-
-  style api fill:#ffffff,stroke:#cbd5e1,stroke-width:1px,color:#0f172a
-  style services fill:#ffffff,stroke:#cbd5e1,stroke-width:1px,color:#0f172a
-  style obs fill:#ffffff,stroke:#cbd5e1,stroke-width:1px,color:#0f172a
+  style database fill:#ffffff,stroke:#cbd5e1,stroke-width:1px,color:#0f172a

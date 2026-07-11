@@ -56,11 +56,37 @@ function createMemoryRankingRepository() {
   };
 }
 
+function createMemoryProcessedRunRepository() {
+  const processedRuns = new Map();
+
+  return {
+    async findByRunId(runId) {
+      return processedRuns.get(runId) || null;
+    },
+
+    async create(data) {
+      if (processedRuns.has(data.runId)) {
+        const error = new Error('duplicate runId');
+        error.code = 11000;
+        throw error;
+      }
+      const processedRun = { ...data };
+      processedRuns.set(data.runId, processedRun);
+      return processedRun;
+    }
+  };
+}
+
 describe('ranking-service', () => {
   let app;
 
   beforeEach(() => {
-    app = createApp({ rankingRepository: createMemoryRankingRepository(), config: TEST_CONFIG });
+    app = createApp({
+      rankingRepository: createMemoryRankingRepository(),
+      processedRunRepository: createMemoryProcessedRunRepository(),
+      runInTransaction: async (work) => work(undefined),
+      config: TEST_CONFIG
+    });
   });
 
   test('POST /ranking/events/run-finished registra vitória pela rota interna oficial', async () => {
@@ -107,6 +133,7 @@ describe('ranking-service', () => {
       .send({
         userId: 'user-003',
         userName: 'Score Forjado',
+        runId: 'run-score-001',
         status: 'victory',
         floor: 2,
         score: 999999
@@ -123,6 +150,7 @@ describe('ranking-service', () => {
       .send({
         userId: 'user-002',
         userName: 'Bruno',
+        runId: 'run-alias-001',
         status: 'defeat',
         floor: 3
       });
@@ -141,11 +169,11 @@ describe('ranking-service', () => {
     await request(app)
       .post('/ranking/events/run-finished')
       .set(INTERNAL_HEADERS)
-      .send({ userId: 'low', userName: 'Low', status: 'defeat', floor: 2 });
+      .send({ userId: 'low', userName: 'Low', runId: 'run-low', status: 'defeat', floor: 2 });
     await request(app)
       .post('/ranking/events/run-finished')
       .set(INTERNAL_HEADERS)
-      .send({ userId: 'high', userName: 'High', status: 'victory', floor: 6 });
+      .send({ userId: 'high', userName: 'High', runId: 'run-high', status: 'victory', floor: 6 });
 
     const response = await request(app)
       .get('/ranking?limit=1')
@@ -199,5 +227,55 @@ describe('ranking-service', () => {
       bestScore: 40,
       bossKills: 0
     });
+  });
+
+  test('repetir o mesmo runId com o mesmo payload não incrementa novamente', async () => {
+    const event = {
+      userId: 'user-001',
+      userName: 'Ana Souza',
+      runId: 'run-idempotent-001',
+      status: 'victory',
+      floor: 6
+    };
+
+    await request(app)
+      .post('/ranking/events/run-finished')
+      .set(INTERNAL_HEADERS)
+      .send(event)
+      .expect(200);
+
+    const repeated = await request(app)
+      .post('/ranking/events/run-finished')
+      .set(INTERNAL_HEADERS)
+      .send(event)
+      .expect(200);
+
+    expect(repeated.body.data).toMatchObject({ totalRuns: 1, victories: 1 });
+  });
+
+  test('mesmo runId com payload diferente retorna conflito', async () => {
+    await request(app)
+      .post('/ranking/events/run-finished')
+      .set(INTERNAL_HEADERS)
+      .send({ userId: 'user-001', runId: 'run-conflict-001', status: 'defeat', floor: 2 })
+      .expect(200);
+
+    const conflict = await request(app)
+      .post('/ranking/events/run-finished')
+      .set(INTERNAL_HEADERS)
+      .send({ userId: 'user-001', runId: 'run-conflict-001', status: 'victory', floor: 2 });
+
+    expect(conflict.status).toBe(409);
+    expect(conflict.body.error.code).toBe('RUN_EVENT_CONFLICT');
+  });
+
+  test('evento sem runId é rejeitado', async () => {
+    const response = await request(app)
+      .post('/ranking/events/run-finished')
+      .set(INTERNAL_HEADERS)
+      .send({ userId: 'user-001', status: 'victory', floor: 6 });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe('INVALID_PAYLOAD');
   });
 });
